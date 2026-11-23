@@ -1,0 +1,64 @@
+==============================================================================
+A. Latihan 2 & 3: logika NULL (tiga nilai)
+==============================================================================
+WHERE email = NULL     -> 0 baris
+WHERE email IS NULL    -> 2 baris
+WHERE email <> 'a@x.com' -> 1 baris (baris NULL ikut tersaring)
+WHERE email IS DISTINCT FROM 'a@x.com' (SQLite: IS NOT) -> 3 baris
+
+NULL OR TRUE                                            -> 1   (None = NULL, 1 = true, 0 = false)
+NULL AND FALSE                                          -> 0   (None = NULL, 1 = true, 0 = false)
+COALESCE(NULL, NULL, 3)                                 -> 3   (None = NULL, 1 = true, 0 = false)
+NULL IS DISTINCT FROM NULL (SQLite: NULL IS NOT NULL)   -> 0   (None = NULL, 1 = true, 0 = false)
+NULL = NULL                                             -> None   (None = NULL, 1 = true, 0 = false)
+TRUE AND NULL                                           -> None   (None = NULL, 1 = true, 0 = false)
+FALSE AND NULL                                          -> 0   (None = NULL, 1 = true, 0 = false)
+5 + NULL                                                -> None   (None = NULL, 1 = true, 0 = false)
+
+==============================================================================
+B. Praktik: Analisis rancangan toko
+==============================================================================
+Pertanyaan 1: PK komposit
+[OK] produk yang sama dimasukkan dua kali ke pesanan sama       -> ditolak (UNIQUE constraint failed: item_pesanan.pesanan_id, item_pesanan.produk_id)
+[OK] produk yang sama di pesanan 2 (valid)                      -> lolos
+
+Pertanyaan 2: ON DELETE CASCADE
+item_pesanan milik pesanan 1: sebelum hapus=2, sesudah hapus=0
+[OK] hapus produk yang masih ada di item_pesanan (tanpa CASCADE) -> ditolak (FOREIGN KEY constraint failed)
+[OK] hapus pelanggan yang masih punya pesanan (tanpa CASCADE)   -> ditolak (FOREIGN KEY constraint failed)
+
+Pertanyaan 3: constraint pencegah data tidak valid
+[OK] stok negatif                                               -> ditolak (CHECK constraint failed: stok >= 0)
+[OK] jumlah = 0                                                 -> ditolak (CHECK constraint failed: jumlah > 0)
+[OK] jumlah negatif                                             -> ditolak (CHECK constraint failed: jumlah > 0)
+[OK] harga negatif                                              -> ditolak (CHECK constraint failed: harga >= 0)
+[OK] email duplikat                                             -> ditolak (UNIQUE constraint failed: pelanggan.email)
+[OK] nama pelanggan NULL                                        -> ditolak (NOT NULL constraint failed: pelanggan.nama)
+[OK] pesanan untuk pelanggan tidak ada                          -> ditolak (FOREIGN KEY constraint failed)
+
+Celah rancangan (SENGAJA lolos, lihat jawaban):
+[OK] status pesanan bebas ('asal-asalan')                       -> lolos
+
+==============================================================================
+C. Latihan 4: rancangan perpustakaan
+==============================================================================
+Data valid masuk. Sekarang uji penolakan:
+[OK] ISBN bukan 13 karakter                                     -> ditolak (CHECK constraint failed: length(isbn) = 13)
+[OK] ISBN duplikat                                              -> ditolak (UNIQUE constraint failed: buku.isbn)
+[OK] tahun terbit tidak masuk akal (1200)                       -> ditolak (CHECK constraint failed: tahun_terbit BETWEEN 1450 AND 2100)
+[OK] pasangan buku-penulis ganda (PK komposit)                  -> ditolak (UNIQUE constraint failed: buku_penulis.buku_id, buku_penulis.penulis_id)
+[OK] dua penulis dengan urutan sama                             -> ditolak (UNIQUE constraint failed: buku_penulis.buku_id, buku_penulis.urutan)
+[OK] eksemplar dengan kondisi tidak dikenal                     -> ditolak (CHECK constraint failed: kondisi IN ('baik', 'rusak', 'hilang'))
+[OK] barcode duplikat                                           -> ditolak (UNIQUE constraint failed: eksemplar.barcode)
+[OK] status anggota tidak valid                                 -> ditolak (CHECK constraint failed: status IN ('aktif', 'ditangguhkan', 'nonaktif'))
+[OK] email anggota duplikat                                     -> ditolak (UNIQUE constraint failed: anggota.email)
+[OK] jatuh tempo sebelum tanggal pinjam                         -> ditolak (CHECK constraint failed: jatuh_tempo >= tanggal_pinjam)
+[OK] tanggal kembali sebelum tanggal pinjam                     -> ditolak (CHECK constraint failed: tanggal_kembali IS NULL OR tanggal_kembali >= tanggal_pinjam)
+[OK] denda negatif                                              -> ditolak (CHECK constraint failed: denda >= 0)
+[OK] eksemplar 1 dipinjam lagi padahal belum kembali (partial unique) -> ditolak (UNIQUE constraint failed: peminjaman.eksemplar_id)
+[OK] setelah dikembalikan, eksemplar 1 boleh dipinjam lagi      -> lolos
+[OK] hapus anggota yang punya riwayat pinjam (RESTRICT)         -> ditolak (FOREIGN KEY constraint failed)
+[OK] hapus penulis yang masih dipakai buku (RESTRICT)           -> ditolak (FOREIGN KEY constraint failed)
+[OK] hapus buku yang masih punya eksemplar (RESTRICT)           -> ditolak (FOREIGN KEY constraint failed)
+
+Semua pengujian sesuai harapan.

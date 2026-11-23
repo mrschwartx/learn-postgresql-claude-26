@@ -1,0 +1,3 @@
+FK menolak: FOREIGN KEY constraint failed
+UNIQUE menolak: UNIQUE constraint failed: pelanggan.email
+CHECK menolak: CHECK constraint failed: total >= 0

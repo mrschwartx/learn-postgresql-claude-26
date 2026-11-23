@@ -1,0 +1,28 @@
+============================================================
+A. Hapus pelanggan yang masih punya pesanan (default = NO ACTION)
+============================================================
+DELETE ditolak: FOREIGN KEY constraint failed
+pelanggan tersisa: 1 | pesanan tersisa: 1
+DELETE produk ditolak: FOREIGN KEY constraint failed
+
+============================================================
+B. Perbandingan opsi ON DELETE pada pesanan.pelanggan_id
+============================================================
+NO ACTION (default)  -> DITOLAK (FOREIGN KEY constraint failed)
+                        pelanggan=1, pesanan=1, item_pesanan=2, pesanan.pelanggan_id=[(1,)]
+RESTRICT             -> DITOLAK (FOREIGN KEY constraint failed)
+                        pelanggan=1, pesanan=1, item_pesanan=2, pesanan.pelanggan_id=[(1,)]
+CASCADE              -> DELETE berhasil
+                        pelanggan=0, pesanan=0, item_pesanan=0, pesanan.pelanggan_id=[]
+SET NULL             -> DELETE berhasil
+                        pelanggan=0, pesanan=1, item_pesanan=2, pesanan.pelanggan_id=[(None,)]
+SET DEFAULT          -> DELETE berhasil
+                        pelanggan=0, pesanan=1, item_pesanan=2, pesanan.pelanggan_id=[(None,)]
+
+============================================================
+C. Atomicity (Latihan 3): pesanan + kurangi stok dalam satu transaksi
+============================================================
+awal                      : pesanan=1, item_pesanan=2, stok Mouse=5
+beli 2 Mouse (stok 5)     : COMMIT -> pesanan=2, item_pesanan=3, stok Mouse=3
+beli 9 Mouse (stok cuma 3): ROLLBACK (CHECK constraint failed: stok >= 0) -> pesanan=2, item_pesanan=3, stok Mouse=3
+Perhatikan: setelah gagal, pesanan & item_pesanan TIDAK ikut tersimpan (all-or-nothing).

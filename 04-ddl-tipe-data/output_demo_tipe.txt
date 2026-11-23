@@ -1,0 +1,15 @@
+== Float vs Decimal (analog double precision vs numeric) ==
+0.1 + 0.2 == 0.3          float  : False | 0.30000000000000004
+0.1 + 0.2 == 0.3          Decimal: True
+jumlah 0.1 sebanyak 10x   float  : 0.9999999999999999 | == 1.0 ? False
+jumlah 0.1 sebanyak 10x   Decimal: 1.0 | == 1.0 ? True
+1000 transaksi Rp0,10     float  : 99.9999999999986 (selisih -1.4068746168049984e-12 dari 100)
+1000 transaksi Rp0,10     Decimal: 100.0
+
+== Waktu dengan zona vs tanpa zona (analog timestamptz vs timestamp) ==
+timestamptz (aware) di Jakarta: 2026-11-23T10:00:00+07:00
+timestamptz (aware) di UTC     : 2026-11-23T03:00:00+00:00 <- instan yang sama
+timestamp (naif)               : 2026-11-23T10:00:00 <- zona tidak diketahui
+Jika server A (WIB) dan server B (UTC) membaca '10:00' naif sebagai jam lokal masing-masing:
+  server A: 2026-11-23T03:00:00+00:00
+  server B: 2026-11-23T10:00:00+00:00 <- selisih 7 jam untuk 'kejadian' yang sama
