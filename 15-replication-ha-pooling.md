@@ -19,6 +19,9 @@
   - [Simulasi Failover Manual](#simulasi-failover-manual)
   - [Logical Replication](#logical-replication)
   - [PgBouncer](#pgbouncer)
+  - [HAProxy untuk Pemisahan Tulis/Baca (Opsional)](#haproxy-untuk-pemisahan-tulisbaca-opsional)
+  - [etcd dan Consul (Opsional)](#etcd-dan-consul-opsional)
+  - [Kubernetes: StatefulSet, Helm, dan Operator (Opsional)](#kubernetes-statefulset-helm-dan-operator-opsional)
   - [Membersihkan Lingkungan](#membersihkan-lingkungan)
 - [Latihan](#latihan)
 
@@ -116,6 +119,87 @@ Replikasi saja tidak otomatis memberi HA — Anda butuh sistem yang **mendeteksi
                      etcd / Consul (DCS) — kunci leader & konfigurasi
 ```
 
+**Patroni: konfigurasi minimal satu node** (`/etc/patroni.yml`; tiap node mengganti `name` dan alamatnya):
+
+```yaml
+scope: pg-toko                  # nama cluster, sama di semua node
+namespace: /service/            # prefiks kunci di DCS
+name: node1                     # unik per node
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: 10.0.1.11:8008
+
+etcd3:
+  hosts: 10.0.1.21:2379,10.0.1.22:2379,10.0.1.23:2379
+  # alternatif Consul:  consul: { host: 127.0.0.1:8500 }
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576      # byte; replica yang lebih tertinggal tidak dipilih
+    postgresql:
+      use_pg_rewind: true
+      parameters:
+        wal_level: replica
+        hot_standby: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - host replication replicator 10.0.1.0/24 scram-sha-256
+    - host all all 10.0.1.0/24 scram-sha-256
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: 10.0.1.11:5432
+  data_dir: /var/lib/postgresql/18/main
+  bin_dir: /usr/lib/postgresql/18/bin
+  authentication:
+    superuser:   { username: postgres,   password: GANTI-INI }
+    replication: { username: replicator, password: GANTI-INI }
+```
+
+Jalankan dengan `patroni /etc/patroni.yml` (biasanya sebagai service systemd). Patroni mengelola start/stop PostgreSQL, jadi **jangan** menjalankan PostgreSQL sendiri.
+
+| Perintah | Fungsi |
+|---|---|
+| `patronictl -c /etc/patroni.yml list` | Status cluster: leader, replica, lag, timeline |
+| `patronictl ... switchover` | Pindah leader terencana (tanpa kehilangan data) |
+| `patronictl ... failover` | Paksa leader baru saat leader sudah tidak ada |
+| `patronictl ... restart pg-toko node2` | Restart PostgreSQL pada satu node |
+| `patronictl ... edit-config` | Ubah konfigurasi dinamis yang tersimpan di DCS |
+| `patronictl ... reinit pg-toko node2` | Bangun ulang replica dari leader |
+| `patronictl ... pause` / `resume` | Matikan sementara failover otomatis (perawatan) |
+| `curl -s -o /dev/null -w "%{http_code}" localhost:8008/primary` | Health check REST: 200 hanya pada leader (`/replica` untuk replica) |
+
+**Alternatif Patroni**
+
+*repmgr* — replikasi dan failover berbasis perintah, dengan daemon `repmgrd` untuk failover otomatis:
+
+```bash
+repmgr -f /etc/repmgr.conf primary register
+repmgr -f /etc/repmgr.conf -h db1 -U repmgr -d repmgr standby clone
+repmgr -f /etc/repmgr.conf standby register
+repmgr -f /etc/repmgr.conf cluster show
+repmgr -f /etc/repmgr.conf standby switchover --siblings-follow
+```
+
+*pg_auto_failover* — sebuah node **monitor** menjalankan *state machine* dan memilih primary:
+
+```bash
+pg_autoctl create monitor --pgdata /var/lib/pg_monitor --hostname monitor --auth scram-sha-256
+pg_autoctl create postgres --pgdata /var/lib/pg_node --monitor 'postgres://autoctl_node@monitor/pg_auto_failover' --hostname node1
+pg_autoctl show state
+pg_autoctl perform switchover
+```
+
+Kriteria memilih: Patroni cocok bila Anda sudah punya DCS (etcd/Consul/Kubernetes); repmgr lebih sederhana tetapi pencegahan *split-brain* butuh perhatian ekstra; pg_auto_failover paling ringan untuk cluster kecil (dua node + monitor) dengan titik kegagalan tunggal pada monitor.
+
 ### 15.5 Load Balancing dan Service Discovery
 
 | Komponen | Peran |
@@ -135,7 +219,57 @@ listen postgres_tulis
     default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
     server pg1 10.0.1.11:5432 maxconn 100 check port 8008
     server pg2 10.0.1.12:5432 maxconn 100 check port 8008
+
+listen postgres_baca
+    bind *:5001
+    balance roundrobin
+    option httpchk GET /replica
+    http-check expect status 200
+    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+    server pg1 10.0.1.11:5432 maxconn 100 check port 8008
+    server pg2 10.0.1.12:5432 maxconn 100 check port 8008
 ```
+
+**Keepalived** membuat satu *virtual IP* (VIP) yang berpindah ke node HAProxy yang sehat, sehingga aplikasi selalu menghubungi alamat yang sama:
+
+```
+# /etc/keepalived/keepalived.conf (node 1; node 2 memakai state BACKUP dan priority lebih rendah)
+vrrp_script chk_haproxy {
+    script "/usr/bin/pidof haproxy"
+    interval 2
+    weight 2
+}
+
+vrrp_instance VI_PG {
+    state MASTER
+    interface eth0
+    virtual_router_id 51
+    priority 101
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass GANTI-INI
+    }
+    virtual_ipaddress {
+        10.0.1.100/24
+    }
+    track_script {
+        chk_haproxy
+    }
+}
+```
+
+**etcd dan Consul** sebagai penyimpan keadaan terdistribusi (DCS) dan *service discovery*:
+
+| Aspek | etcd | Consul |
+|---|---|---|
+| Konsensus | Raft | Raft |
+| Peran utama | Penyimpan kunci-nilai | Service discovery, health check, key-value |
+| Konfigurasi di Patroni | `etcd3: hosts: ...` | `consul: host: ...` |
+| Jumlah node anjuran | Ganjil (3 atau 5) agar ada kuorum | Ganjil (3 atau 5) server |
+| Memeriksa data Patroni | `etcdctl get --prefix /service/pg-toko/` | `consul kv get -recurse service/pg-toko/` |
+
+Pada cluster Patroni, kunci `/service/pg-toko/leader` menyimpan siapa leader saat ini dan berumur pendek (TTL); bila leader gagal memperbaruinya, node lain bisa mengambil alih.
 
 ### 15.6 Connection Pooling
 
@@ -178,6 +312,101 @@ Pedoman ukuran: jumlah koneksi aktif ke database sebaiknya sekitar **2–4× jum
 | **Operator** (CloudNativePG, Zalando, Crunchy) | Direkomendasikan — mengelola HA, backup ke object storage, upgrade, pooling |
 | **Helm chart** (Bitnami `postgresql`, `postgresql-ha`) | Cepat untuk dev/test; evaluasi dukungan jangka panjang untuk produksi |
 | **StatefulSet manual** | Rumit — hindari kecuali sangat paham |
+
+**StatefulSet sederhana** (satu instance, untuk belajar; bukan HA):
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pg-secret
+stringData:
+  POSTGRES_PASSWORD: rahasia
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg
+spec:
+  clusterIP: None            # headless: nama DNS stabil pg-0.pg
+  selector:
+    app: pg
+  ports:
+    - name: pg
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pg
+spec:
+  serviceName: pg
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pg
+  template:
+    metadata:
+      labels:
+        app: pg
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: pg-secret
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+```
+
+`volumeClaimTemplates` membuat PersistentVolumeClaim per pod yang tetap ada walau pod dihapus. Inilah alasan memakai StatefulSet, bukan Deployment. Yang **tidak** Anda dapatkan: replikasi, failover, backup, dan upgrade, sehingga semuanya harus dibangun sendiri.
+
+**Helm**
+
+```bash
+helm repo add cnpg https://cloudnative-pg.github.io/charts
+helm upgrade --install cnpg --namespace cnpg-system --create-namespace cnpg/cloudnative-pg   # memasang operator
+helm list -A
+```
+
+Chart komunitas seperti Bitnami `postgresql` dipasang dengan `helm install pg oci://registry-1.docker.io/bitnamicharts/postgresql --set auth.postgresPassword=rahasia`. Cek dulu status dan kebijakan image Bitnami saat ini sebelum mengandalkannya.
+
+**Operator (CloudNativePG)** — cukup mendeklarasikan cluster:
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-toko
+spec:
+  instances: 3
+  storage:
+    size: 5Gi
+```
+
+```bash
+kubectl apply -f cluster.yaml
+kubectl get cluster pg-toko                            # status dan primary saat ini
+kubectl get pods -l cnpg.io/cluster=pg-toko
+kubectl get secret pg-toko-app -o jsonpath='{.data.password}' | base64 -d
+# Service otomatis: pg-toko-rw (primary), pg-toko-ro (replica), pg-toko-r (semua)
+```
 
 Prinsip: gunakan `PersistentVolume` dengan storage cepat, atur `PodDisruptionBudget` dan *anti-affinity*, simpan backup & arsip WAL di object storage, dan uji *failover* secara rutin.
 
@@ -265,9 +494,84 @@ docker run -d --name pgbouncer --network pgnet -p 6432:5432 \
 psql "postgresql://postgres:rahasia@localhost:6432/postgres" -c "SELECT 1;"
 ```
 
+### HAProxy untuk Pemisahan Tulis/Baca (Opsional)
+
+HAProxy di sini memakai *health check* TCP sederhana (tanpa Patroni): port 5000 menuju primary, port 5001 menuju replica.
+
+```bash
+mkdir -p haproxy
+cat > haproxy/haproxy.cfg <<'EOF'
+global
+    maxconn 200
+
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client  30m
+    timeout server  30m
+
+listen tulis
+    bind *:5000
+    server primary pg-primary:5432 check
+
+listen baca
+    bind *:5001
+    balance roundrobin
+    server replica1 pg-replica:5432 check
+
+listen statistik
+    mode http
+    bind *:7000
+    stats enable
+    stats uri /
+EOF
+
+docker run -d --name haproxy --network pgnet -p 5000:5000 -p 5001:5001 -p 7000:7000 \
+  -v "$PWD/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro" haproxy:lts
+
+for port in 5000 5001; do
+  docker run --rm --network pgnet -e PGPASSWORD=rahasia postgres:18 \
+    psql -h haproxy -p $port -U postgres -Atc "SELECT $port AS port, pg_is_in_recovery() AS replica;"
+done
+```
+
+Port 5000 harus menjawab `f` dan port 5001 `t`. Buka `http://localhost:7000` untuk halaman statistik. Jika Anda sudah menjalankan simulasi failover, `pg-primary` sudah mati: ubah server pada `listen tulis` menjadi `pg-replica:5432`, hapus blok `listen baca`, lalu `docker restart haproxy`. Anda baru saja melakukan langkah pengalihan yang pada sistem produksi dikerjakan otomatis oleh Patroni dan health check `/primary`.
+
+### etcd dan Consul (Opsional)
+
+```bash
+docker run -d --name etcd --network pgnet quay.io/coreos/etcd:v3.5.17 etcd \
+  --advertise-client-urls http://etcd:2379 --listen-client-urls http://0.0.0.0:2379
+docker exec etcd etcdctl endpoint health
+docker exec etcd etcdctl put /service/pg-toko/leader node1
+docker exec etcd etcdctl get --prefix /service/pg-toko/
+
+docker run -d --name consul --network pgnet hashicorp/consul agent -dev -client=0.0.0.0
+docker exec consul consul members
+docker exec consul consul kv put service/pg-toko/leader node1
+docker exec consul consul kv get -recurse service/pg-toko/
+```
+
+Ini hanya mendemonstrasikan penyimpanan kunci-nilai tempat Patroni menaruh *leader key*. Instance tunggal seperti ini bukan konfigurasi produksi (butuh 3 atau 5 anggota untuk kuorum).
+
+### Kubernetes: StatefulSet, Helm, dan Operator (Opsional)
+
+Butuh cluster lokal seperti `kind` atau `minikube`, serta `kubectl` dan `helm`. Simpan manifest StatefulSet dari 15.7 sebagai `pg-statefulset.yaml`:
+
+```bash
+kubectl apply -f pg-statefulset.yaml
+kubectl get pods -w
+kubectl exec -it pg-0 -- psql -U postgres -c "SELECT version();"
+kubectl delete pod pg-0                      # pod dibuat ulang, data tetap karena PVC
+kubectl exec -it pg-0 -- psql -U postgres -c "SELECT 1;"
+kubectl delete -f pg-statefulset.yaml && kubectl delete pvc data-pg-0
+```
+
+Lalu pasang operator CloudNativePG dengan Helm dan buat cluster 3 instance dari 15.7. Hapus pod primary (lihat `kubectl get cluster pg-toko`) dan amati operator memilih primary baru.
+
 ### Membersihkan Lingkungan
 
-Bersihkan: `docker rm -f pg-primary pg-replica pg-sub pgbouncer && docker volume rm primary-data replica-data && docker network rm pgnet`.
+Bersihkan: `docker rm -f pg-primary pg-replica pg-sub pgbouncer haproxy etcd consul && docker volume rm primary-data replica-data && docker network rm pgnet`.
 
 ## Latihan
 
@@ -277,6 +581,10 @@ Bersihkan: `docker rm -f pg-primary pg-replica pg-sub pgbouncer && docker volume
 4. Siapkan logical replication dua arah **berbeda tabel** dan buktikan bahwa DDL (mis. `ALTER TABLE ADD COLUMN`) tidak otomatis tereplikasi. Bagaimana prosedur yang aman untuk perubahan skema?
 5. Gambarkan arsitektur HA 3 node dengan Patroni + etcd + HAProxy. Jelaskan apa yang terjadi saat primary mati: siapa yang mendeteksi, memilih leader baru, dan bagaimana klien diarahkan?
 6. Diskusikan: aplikasi serverless membuka 3.000 koneksi singkat ke PostgreSQL. Jelaskan masalahnya dan solusi dengan PgBouncer mode `transaction` beserta batasan fitur sesi yang harus diperhatikan.
+7. Tulis `patroni.yml` untuk tiga node dan jelaskan arti `ttl`, `loop_wait`, `retry_timeout`, dan `maximum_lag_on_failover`. Apa yang terjadi bila `ttl` terlalu kecil pada jaringan yang tidak stabil?
+8. Bandingkan Patroni, repmgr, dan pg_auto_failover dari sisi pencegahan split-brain, ketergantungan komponen luar, dan kerumitan operasional. Pilih satu untuk cluster 3 node di dua datacenter dan jelaskan alasannya.
+9. Jelaskan peran masing-masing komponen dalam arsitektur Patroni + etcd + HAProxy + Keepalived. Jika node HAProxy yang memegang VIP mati, bagaimana klien tetap terhubung?
+10. Terapkan manifest StatefulSet dan operator CloudNativePG. Bandingkan apa yang terjadi ketika Anda menghapus pod primary pada keduanya, dan jelaskan mengapa StatefulSet saja tidak cukup untuk HA.
 
 ---
 

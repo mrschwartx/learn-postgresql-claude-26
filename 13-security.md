@@ -19,6 +19,7 @@
   - [Default Privileges dan Hak per Kolom](#default-privileges-dan-hak-per-kolom)
   - [Row-Level Security (Multi-Tenant)](#row-level-security-multi-tenant)
   - [Autentikasi](#autentikasi)
+  - [SELinux (Opsional)](#selinux-opsional)
 - [Latihan](#latihan)
 
 ---
@@ -173,6 +174,25 @@ Gunakan `hostssl` di `pg_hba.conf` untuk **mewajibkan** SSL pada koneksi jaringa
 
 Pada distro berbasis RHEL, **SELinux** membatasi proses `postgres` hanya ke direktori/port berlabel yang diizinkan (mis. data directory di lokasi custom perlu `semanage fcontext` + `restorecon`; port non-standar perlu `semanage port`). Jangan menonaktifkan SELinux — perbaiki labelnya.
 
+| Konsep | Penjelasan |
+|---|---|
+| **Mode** | `Enforcing` (melarang dan mencatat), `Permissive` (hanya mencatat; berguna untuk diagnosis), `Disabled` |
+| **Label (konteks)** | Setiap file, port, dan proses punya label: data PostgreSQL berlabel `postgresql_db_t`, port `postgresql_port_t`, proses `postgresql_t` |
+| **Policy** | Aturan yang menentukan label proses mana boleh mengakses label apa |
+| **AVC denial** | Catatan penolakan akses di `/var/log/audit/audit.log` |
+
+| Perintah | Fungsi |
+|---|---|
+| `getenforce` / `sestatus` | Cek mode dan status SELinux |
+| `ls -Z`, `ps -eZ \| grep postgres` | Lihat label file dan proses |
+| `semanage fcontext -a -t postgresql_db_t "/data/pgsql(/.*)?"` | Daftarkan aturan label untuk direktori data di lokasi custom |
+| `restorecon -Rv /data/pgsql` | Terapkan label sesuai aturan tadi |
+| `semanage port -a -t postgresql_port_t -p tcp 5433` | Izinkan PostgreSQL memakai port non-standar |
+| `ausearch -m avc -ts recent` | Cari penolakan terbaru |
+| `getsebool -a \| grep -i postgres` | Lihat boolean SELinux terkait PostgreSQL |
+
+Gejala khas: PostgreSQL gagal start setelah data directory dipindah, padahal izin file (`chown`/`chmod`) sudah benar. Periksa `ausearch -m avc` sebelum mencurigai hal lain.
+
 Checklist hardening:
 
 | Area | Praktik |
@@ -266,6 +286,32 @@ SELECT rolname, left(rolpassword, 14) AS awal_hash FROM pg_authid WHERE rolname 
 SELECT line_number, type, database, user_name, address, auth_method FROM pg_hba_file_rules;
 ```
 
+### SELinux (Opsional)
+
+Praktik ini butuh distro berbasis RHEL (Rocky/Alma/RHEL/Fedora) di VM; container Docker pada umumnya tidak cocok untuk latihan ini. Paket `semanage` ada di `policycoreutils-python-utils`.
+
+```bash
+getenforce                                   # Enforcing
+sudo dnf install -y postgresql-server policycoreutils-python-utils
+sudo mkdir -p /data/pgsql && sudo chown postgres:postgres /data/pgsql
+ls -Zd /data/pgsql                           # label default belum postgresql_db_t
+
+# Inisialisasi cluster di lokasi custom tanpa label yang benar
+sudo -u postgres /usr/bin/initdb -D /data/pgsql
+sudo systemctl edit postgresql               # set Environment=PGDATA=/data/pgsql
+sudo systemctl restart postgresql            # gagal
+sudo ausearch -m avc -ts recent | tail       # lihat penolakan SELinux
+
+# Perbaiki label, bukan matikan SELinux
+sudo semanage fcontext -a -t postgresql_db_t "/data/pgsql(/.*)?"
+sudo restorecon -Rv /data/pgsql
+sudo systemctl restart postgresql            # berhasil
+
+# Port non-standar
+sudo semanage port -a -t postgresql_port_t -p tcp 5433
+semanage port -l | grep postgresql_port_t
+```
+
 ## Latihan
 
 1. Rancang tiga role (`owner`, `aplikasi`, `readonly`) untuk skema `app` dan tulis seluruh perintah `GRANT`/`REVOKE`-nya, termasuk `ALTER DEFAULT PRIVILEGES` agar tabel baru ikut tercakup. Uji dengan login sebagai masing-masing role.
@@ -274,6 +320,7 @@ SELECT line_number, type, database, user_name, address, auth_method FROM pg_hba_
 4. Tulis aturan `pg_hba.conf` untuk: aplikasi dari subnet `10.0.1.0/24` memakai SCRAM + SSL, replikasi dari satu IP khusus, dan menolak semua lainnya. Mengapa urutan baris penting?
 5. Tunjukkan contoh SQL injection pada query yang dibangun dengan string concatenation, lalu perbaiki memakai parameterized query (bahasa pilihan Anda). Hak apa dari role aplikasi yang membatasi kerusakan?
 6. Diskusikan: mengapa aplikasi tidak boleh terhubung sebagai `postgres` (superuser), dan risiko apa yang muncul bila fungsi `SECURITY DEFINER` tidak mengunci `search_path`?
+7. (Opsional, VM RHEL) Pindahkan data directory PostgreSQL ke `/data/pgsql`, reproduksi kegagalan start akibat SELinux, temukan penyebabnya lewat `ausearch -m avc`, lalu perbaiki dengan `semanage fcontext` + `restorecon`. Mengapa mematikan SELinux bukan solusi yang baik?
 
 ---
 

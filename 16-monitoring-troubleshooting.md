@@ -20,6 +20,8 @@
   - [Proteksi dari Sesi Nakal](#proteksi-dari-sesi-nakal)
   - [Monitoring OS dan Prometheus (Opsional)](#monitoring-os-dan-prometheus-opsional)
   - [Analisis Log](#analisis-log)
+  - [Monitoring Backup: check_pgbackrest (Opsional)](#monitoring-backup-check_pgbackrest-opsional)
+  - [Otomasi: Shell, Python, dan Ansible](#otomasi-shell-python-dan-ansible)
 - [Latihan](#latihan)
 
 ---
@@ -78,8 +80,22 @@ Mengaktifkan `pg_stat_statements`: tambahkan ke `shared_preload_libraries` (**re
 | **pgcenter** | "top" interaktif untuk PostgreSQL |
 | **pg_activity** | Antarmuka "top" untuk `pg_stat_activity` |
 | **temBoard** | Dashboard & manajemen berbasis web |
-| **check_pgactivity**, **check_postgres** | Plugin Nagios/Icinga/Zabbix |
+| **check_pgactivity**, **check_postgres** | Plugin Nagios/Icinga/Zabbix untuk kondisi server (koneksi, lag replikasi, WAL, dll.) |
+| **check_pgbackrest** | Plugin Nagios/Icinga untuk **backup pgBackRest**: kebijakan retensi dan kelengkapan arsip WAL |
 | **Cloud-native** | CloudWatch/Performance Insights (RDS), Cloud SQL Insights |
+
+**Contoh penggunaan alat yang jarang dibahas**
+
+| Alat | Contoh |
+|---|---|
+| **Zabbix** | Pasang Zabbix agent 2 (memiliki plugin PostgreSQL bawaan), lalu kaitkan template *PostgreSQL by Zabbix agent 2* ke host dan isi macro koneksi (`{$PG.URI}`, `{$PG.USER}`, `{$PG.PASSWORD}`) |
+| **pgcenter** | `pgcenter top -h localhost -U postgres -d toko`; tombol angka berpindah antar tampilan (database, tabel, statement, replikasi) |
+| **pgCluu** | `pgcluu_collectd -i 60 /var/lib/pgcluu/data/` mengumpulkan statistik tiap 60 detik; `pgcluu -o /var/www/pgcluu /var/lib/pgcluu/data/` membuat laporan HTML |
+| **temBoard** | Terdiri dari server UI dan *agent* di tiap host PostgreSQL; agent didaftarkan ke UI lalu Anda mendapat dashboard, statistik, dan manajemen aktivitas lewat web |
+| **check_pgactivity** | `check_pgactivity -h localhost -U nagios -s connection -w 70% -c 90%`; `-s backends` untuk jumlah koneksi; `--list` menampilkan semua *service* |
+| **check_pgbackrest** | `check_pgbackrest --service=retention --stanza=toko --retention-full=2` memberi *critical* bila full backup kurang dari 2; `--service=archives --stanza=toko` memeriksa WAL yang hilang |
+
+Pilihan pada plugin Nagios (`-w` untuk *warning*, `-c` untuk *critical*) mengikuti konvensi Nagios: kode keluar 0 = OK, 1 = WARNING, 2 = CRITICAL, 3 = UNKNOWN.
 
 ### 16.4 Troubleshooting Sistematis
 
@@ -146,6 +162,157 @@ pgbadger -j 4 -o laporan.html /var/log/postgresql/postgresql-*.log
 
 Prinsip: setiap perubahan konfigurasi dan skema **dilacak di Git**, dapat diulang, dan dites di staging.
 
+**Shell script: health check sederhana**
+
+```bash
+#!/usr/bin/env bash
+# health_check.sh — keluar dengan kode 0=OK, 1=WARNING, 2=CRITICAL
+set -euo pipefail
+export PGCONNECT_TIMEOUT=5
+PSQL="psql -X -At -h ${PGHOST:-localhost} -U ${PGUSER:-postgres} -d ${PGDATABASE:-postgres}"
+
+pg_isready -q -h "${PGHOST:-localhost}" || { echo "CRITICAL: server tidak merespons"; exit 2; }
+
+aktif=$($PSQL -c "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'")
+maks=$($PSQL -c "SHOW max_connections")
+persen=$(( aktif * 100 / maks ))
+
+if   [ "$persen" -ge 90 ]; then echo "CRITICAL: koneksi $aktif/$maks ($persen%)"; exit 2
+elif [ "$persen" -ge 70 ]; then echo "WARNING: koneksi $aktif/$maks ($persen%)"; exit 1
+else echo "OK: koneksi $aktif/$maks ($persen%)"; fi
+```
+
+**Bahasa pemrograman (Python dengan psycopg 3)**
+
+```python
+import psycopg
+
+with psycopg.connect("postgresql://postgres:rahasia@localhost:5432/toko") as conn:
+    baris = conn.execute(
+        "SELECT relname, n_dead_tup FROM pg_stat_user_tables ORDER BY n_dead_tup DESC LIMIT 5"
+    ).fetchall()
+    for nama, mati in baris:
+        print(f"{nama:30} {mati}")
+```
+
+**Configuration management: satu tugas, empat alat**
+
+Tujuan sama: PostgreSQL terpasang, database `toko` dan role `app` ada, serta `app` boleh login dari jaringan internal. Nama paket dan path bergantung distro; contoh memakai Debian/Ubuntu dengan repositori PGDG.
+
+*Ansible* (koleksi `community.postgresql`, `ansible-galaxy collection install community.postgresql`):
+
+```yaml
+- name: Siapkan PostgreSQL
+  hosts: db
+  become: true
+  vars:
+    pg_version: 18
+  tasks:
+    - name: Pasang paket
+      ansible.builtin.apt:
+        name: ["postgresql-{{ pg_version }}", python3-psycopg2]
+        state: present
+        update_cache: true
+
+    - name: Atur shared_buffers
+      community.postgresql.postgresql_set:
+        name: shared_buffers
+        value: 1GB
+      become_user: postgres
+      notify: Restart PostgreSQL
+
+    - name: Buat database toko
+      community.postgresql.postgresql_db:
+        name: toko
+      become_user: postgres
+
+    - name: Buat role app
+      community.postgresql.postgresql_user:
+        name: app
+        password: "{{ vault_app_password }}"
+        db: toko
+      become_user: postgres
+
+    - name: Izinkan app dari jaringan internal
+      community.postgresql.postgresql_pg_hba:
+        dest: "/etc/postgresql/{{ pg_version }}/main/pg_hba.conf"
+        contype: host
+        databases: toko
+        users: app
+        source: 10.0.1.0/24
+        method: scram-sha-256
+      notify: Reload PostgreSQL
+
+  handlers:
+    - name: Restart PostgreSQL
+      ansible.builtin.service: { name: postgresql, state: restarted }
+    - name: Reload PostgreSQL
+      ansible.builtin.service: { name: postgresql, state: reloaded }
+```
+
+*Salt* (state `/srv/salt/postgres.sls`):
+
+```yaml
+postgresql:
+  pkg.installed:
+    - name: postgresql-18
+  service.running:
+    - name: postgresql
+    - enable: True
+    - require:
+      - pkg: postgresql
+
+database_toko:
+  postgres_database.present:
+    - name: toko
+    - user: postgres
+    - require:
+      - service: postgresql
+
+role_app:
+  postgres_user.present:
+    - name: app
+    - password: {{ pillar['pg_app_password'] }}
+    - user: postgres
+    - require:
+      - service: postgresql
+```
+
+*Puppet* (modul `puppetlabs-postgresql`):
+
+```puppet
+class { 'postgresql::globals':
+  version             => '18',
+  manage_package_repo => true,
+}
+class { 'postgresql::server':
+  listen_addresses => '*',
+}
+postgresql::server::db { 'toko':
+  user     => 'app',
+  password => postgresql::postgresql_password('app', $app_password),
+}
+postgresql::server::pg_hba_rule { 'app dari jaringan internal':
+  type        => 'host',
+  database    => 'toko',
+  user        => 'app',
+  address     => '10.0.1.0/24',
+  auth_method => 'scram-sha-256',
+}
+```
+
+*Chef* (cookbook `sous-chefs/postgresql`; nama properti mengikuti versi cookbook, jadi cocokkan dengan README-nya):
+
+```ruby
+postgresql_server_install 'PostgreSQL' do
+  version '18'
+  password data_bag_item('postgres', 'secrets')['postgres_password']
+  action [:install, :create]
+end
+```
+
+Perbandingan singkat: Ansible *agentless* (SSH) dan berurutan; Salt dan Puppet memakai agen dan model deklaratif; Chef memakai Ruby DSL. Semuanya idempoten: menjalankannya berulang menghasilkan keadaan yang sama.
+
 ### 16.8 Capacity Planning dan Provisioning
 
 | Sumber daya | Pertimbangan |
@@ -167,6 +334,21 @@ Lakukan **load test** dengan `pgbench` atau skenario nyata sebelum produksi.
 | **Menulis patch** | Ikuti panduan kontribusi di wiki PostgreSQL; kirim patch ke `pgsql-hackers` |
 | **Dokumentasi & terjemahan** | Perbaikan dokumen dan terjemahan |
 | **Komunitas** | Konferensi (PGConf), user group lokal, blog Planet PostgreSQL |
+
+**Langkah praktis memulai kontribusi**
+
+| Tahap | Perintah/tindakan |
+|---|---|
+| Berlangganan | Daftar ke `pgsql-hackers` dan `pgsql-general` lewat postgresql.org/list; baca arsipnya beberapa minggu sebelum menulis |
+| Ambil kode | `git clone https://git.postgresql.org/git/postgresql.git` |
+| Bangun untuk pengembangan | `./configure --enable-debug --enable-cassert --enable-tap-tests --prefix=$HOME/pg-dev && make -j4 && make check` |
+| Tulis patch | Buat cabang, ubah kode dan dokumentasi, tambahkan tes regresi di `src/test/regress` |
+| Buat berkas patch | `git format-patch -v1 origin/master` (versi berikutnya: `-v2`, dst.) |
+| Kirim | Lampirkan patch ke thread di `pgsql-hackers` dengan penjelasan masalah dan alasan solusi |
+| Daftarkan di CommitFest | Tambahkan entri di commitfest.postgresql.org agar patch ditinjau pada putaran berikutnya |
+| Review patch orang lain | Terapkan patch, jalankan `make check`, uji skenario, lalu balas di thread dengan temuan Anda |
+
+Meninjau patch orang lain adalah jalan masuk paling mudah: Anda belajar basis kode dan kebiasaan komunitas tanpa harus menulis fitur besar.
 
 Roadmap terkait yang layak dipelajari berikutnya: **Backend**, **DevOps**, **MongoDB** (perbandingan model dokumen), dan **System Design**.
 
@@ -258,6 +440,44 @@ docker exec pg-latihan psql -U postgres -d toko -c "SELECT count(*) FROM app.tra
 docker logs pg-latihan 2>&1 | grep 'duration:' | tail -5
 ```
 
+### Monitoring Backup: check_pgbackrest (Opsional)
+
+Lanjutan dari praktik pgBackRest di [Modul 14](14-backup-recovery-upgrade.md). Paket Debian bernama `check-pgbackrest` (membutuhkan pgBackRest versi baru):
+
+```bash
+docker exec -u root pg-latihan bash -c 'apt-get install -y -qq check-pgbackrest'
+
+docker exec -u postgres pg-latihan check_pgbackrest --service=retention --stanza=toko --retention-full=1 --output=human
+docker exec -u postgres pg-latihan check_pgbackrest --service=retention --stanza=toko --retention-full=5 --output=human
+echo "kode keluar: $?"       # perhatikan: kode keluar 2 (CRITICAL) karena baru ada 1 full backup
+
+docker exec -u postgres pg-latihan check_pgbackrest --service=archives --stanza=toko --output=human
+docker exec -u postgres pg-latihan check_pgbackrest --list
+```
+
+Jika paket tidak tersedia di repositori Anda, ambil skripnya dari repositori proyek `check_pgbackrest` (Dalibo/pgstef).
+
+### Otomasi: Shell, Python, dan Ansible
+
+```bash
+# Shell: simpan skrip 16.7 sebagai health_check.sh
+chmod +x health_check.sh
+PGPASSWORD=rahasia PGHOST=localhost ./health_check.sh; echo "kode keluar: $?"
+
+# Jadwalkan tiap 5 menit dengan cron
+( crontab -l 2>/dev/null; echo "*/5 * * * * PGPASSWORD=rahasia /home/user/health_check.sh >> /tmp/health.log 2>&1" ) | crontab -
+
+# Python
+pip install "psycopg[binary]"
+python3 cek_dead_tuple.py     # simpan cuplikan Python 16.7 sebagai cek_dead_tuple.py
+
+# Ansible (butuh host target; untuk uji lokal pakai localhost)
+ansible-galaxy collection install community.postgresql
+ansible-playbook -i "localhost," -c local --ask-become-pass postgres.yml --check    # --check = dry run
+```
+
+Jalankan playbook dua kali tanpa `--check` dan perhatikan bahwa putaran kedua melaporkan `changed=0`. Itulah idempotensi.
+
 ## Latihan
 
 1. Jalankan `pgbench` selama 60 detik, lalu gunakan `pg_stat_statements` untuk menemukan tiga query dengan `total_exec_time` terbesar. Mana yang lebih layak dioptimalkan: query dengan `mean_exec_time` terbesar atau `total_exec_time` terbesar? Jelaskan.
@@ -266,6 +486,9 @@ docker logs pg-latihan 2>&1 | grep 'duration:' | tail -5
 4. Susun *runbook* troubleshooting: "disk server database hampir penuh". Urutkan langkah pemeriksaan (WAL, slot replikasi, log, bloat, tabel temporer) dan tindakan aman untuk masing-masing.
 5. Terapkan metode **USE** dan **RED** pada layanan Anda: tentukan minimal tiga metrik + ambang alert untuk masing-masing metode.
 6. Rancang rencana belajar lanjutan Anda berdasarkan roadmap: topik mana yang ingin diperdalam berikutnya (mis. tuning lanjutan, Patroni, internals, kontribusi)? Tentukan proyek kecil untuk masing-masing.
+7. Tulis playbook Ansible (atau state Salt/modul Puppet) yang memasang PostgreSQL, membuat database dan role, serta mengatur `pg_hba.conf`. Jalankan dua kali dan buktikan hasilnya idempoten.
+8. Pasang `check_pgbackrest` dan `check_pgactivity`, lalu pasang ambang *warning/critical* yang masuk akal untuk retensi backup dan jumlah koneksi. Bagaimana Anda menghubungkannya ke Zabbix atau Nagios?
+9. Tinjau satu patch yang sedang berjalan di CommitFest (cukup baca thread dan diskusinya) dan ringkas masalah yang ingin diselesaikan patch tersebut serta keberatan reviewer.
 
 Selamat — Anda telah menuntaskan seluruh modul. Kembali ke [Daftar Isi](README.md) untuk meninjau ulang modul mana pun yang perlu diperdalam.
 

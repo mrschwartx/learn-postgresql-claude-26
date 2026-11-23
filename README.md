@@ -38,15 +38,17 @@ PostgreSQL adalah **jangkar** seri course Anda: Docker/Kubernetes/EKS menjawab "
 | **Learn SQL — lanjutan** | Joins, subqueries, grouping, CTE, lateral join, set operations | [6](06-join-subquery-cte.md) |
 | **Advanced SQL** | Window & aggregate functions, recursive CTE, PL/pgSQL, procedures, triggers | [8](08-advanced-sql-plpgsql.md) |
 | **Indexes and their Usecases** | B-Tree, Hash, GiST, SP-GiST, GIN, BRIN | [9](09-index.md) |
-| **Query Analysis & SQL Optimization** | `EXPLAIN`, depesz, PEV2/dalibo, query planner | [10](10-query-planner-explain.md) |
-| **Application Skills** | Normalization, partitioning, sharding, queues (PgQ), migrations, bulk loading, OLTP/OLAP/HTAP | [11](11-desain-schema-pola.md) |
+| **Query Analysis & SQL Optimization** | `EXPLAIN`, depesz, PEV2/dalibo, Tensor, query planner | [10](10-query-planner-explain.md) |
+| **Application Skills** | Normalization, partitioning, sharding, queues (`SKIP LOCKED`, PgQ), migrations (pola/anti-pola, Flyway, Liquibase, Alembic, dll.), bulk loading, OLTP/OLAP/HTAP | [11](11-desain-schema-pola.md) |
 | **Configuring / Low Level Internals** | Resource usage, vacuum, checkpoints, bgwriter, buffers, locks, physical storage, system catalog, per-user/db settings, storage parameters, extensions | [12](12-internal-konfigurasi.md) |
 | **Security** | Object privileges, grant/revoke, default privileges, RLS, SELinux, roles, `pg_hba.conf`, SSL | [13](13-security.md) |
-| **Infrastructure — Backup & Upgrade** | `pg_dump`, `pg_dumpall`, `pg_restore`, `pg_basebackup`, pgBackRest, Barman, WAL-G, `pg_probackup`, `pg_upgrade`, anonymization | [14](14-backup-recovery-upgrade.md) |
-| **Infrastructure — Replication & HA** | Streaming/logical replication, Patroni, HAProxy, Keepalived, Consul/etcd, PgBouncer, Kubernetes | [15](15-replication-ha-pooling.md) |
-| **Troubleshooting & Monitoring** | OS tools, profiling (gdb, strace, eBPF, perf), pgBadger, pgCluu, `pg_stat_*`, USE/RED/Golden Signals, Prometheus, Zabbix, temBoard | [16](16-monitoring-troubleshooting.md) |
-| **Learn to Automate** | Shell scripts, Ansible, Salt, Puppet, Chef | [16](16-monitoring-troubleshooting.md) |
+| **Infrastructure — Backup & Upgrade** | `pg_dump`, `pg_dumpall`, `pg_restore`, `pg_basebackup`, pgBackRest, Barman, WAL-G, `pg_probackup`, `pg_upgrade`, upgrade via logical replication, validasi backup (`pg_verifybackup`), anonymization (PostgreSQL Anonymizer) | [14](14-backup-recovery-upgrade.md) |
+| **Infrastructure — Replication & HA** | Streaming/logical replication, Patroni (+ repmgr, pg_auto_failover), HAProxy, Keepalived, Consul/etcd, PgBouncer, Kubernetes (StatefulSet, Helm, CloudNativePG) | [15](15-replication-ha-pooling.md) |
+| **Troubleshooting & Monitoring** | OS tools, profiling (gdb, strace, eBPF, perf), pgBadger, pgCluu, `pg_stat_*`, USE/RED/Golden Signals, Prometheus, Zabbix, temBoard, pgcenter, check_pgactivity, check_pgbackrest | [16](16-monitoring-troubleshooting.md) |
+| **Learn to Automate** | Shell scripts, Python, Ansible, Salt, Puppet, Chef (dengan contoh untuk masing-masing) | [16](16-monitoring-troubleshooting.md) |
 | **Get Involved in Development** | Mailing lists, reviewing & writing patches | [16](16-monitoring-troubleshooting.md) |
+
+> **Catatan penambahan:** bagian berlabel **(Opsional)** (pgBackRest, PostgreSQL Anonymizer, PgQ, Flyway, HAProxy, etcd/Consul, Kubernetes, SELinux, check_pgbackrest) membutuhkan paket, image, atau lingkungan tambahan. Nama paket dan versi image bisa berubah; cocokkan dengan dokumentasi resmi masing-masing alat bila ada perintah yang gagal.
 
 ## Cara Menggunakan Materi Ini
 

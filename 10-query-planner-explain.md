@@ -90,7 +90,8 @@ Cara membaca: rencana berupa **pohon** — baca dari node **paling menjorok (pal
 |---|---|
 | **explain.depesz.com** | Tempel hasil `EXPLAIN ANALYZE`; sorot node paling lambat |
 | **explain.dalibo.com (PEV2)** | Visualisasi grafis pohon rencana |
-| **pgMustard**, **Tensor** | Analisis rencana dengan saran |
+| **explain.tensor.ru (Tensor)** | Layanan web gratis dari perusahaan Tensor: memvisualisasikan rencana, menandai node bermasalah, dan memberi rekomendasi; antarmukanya terutama berbahasa Rusia |
+| **pgMustard** | Analisis rencana komersial dengan saran perbaikan |
 | **`auto_explain`** (extension) | Log otomatis rencana query yang lambat |
 | **`pg_stat_statements`** | Statistik agregat per query (waktu total, rata-rata, jumlah panggilan) — temukan query yang paling perlu dioptimalkan ([Modul 16](16-monitoring-troubleshooting.md)) |
 
@@ -195,7 +196,19 @@ ROLLBACK;
 
 ### Visualisasi Rencana
 
-Tempel hasil `EXPLAIN (ANALYZE, BUFFERS)` ke **explain.depesz.com** atau **explain.dalibo.com** dan temukan node paling lambat.
+Tempel hasil `EXPLAIN (ANALYZE, BUFFERS)` ke **explain.depesz.com**, **explain.dalibo.com** (PEV2), atau **explain.tensor.ru** dan temukan node paling lambat.
+
+```sql
+-- Format teks: cocok untuk depesz dan Tensor
+EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM transaksi WHERE pelanggan_id = 4242;
+
+-- Format JSON: cocok untuk PEV2 (explain.dalibo.com)
+EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT * FROM transaksi WHERE pelanggan_id = 4242;
+```
+
+Bandingkan ketiga alat dengan rencana yang sama: apa yang disorot masing-masing, dan apakah Tensor memberi rekomendasi yang tidak diberikan dua lainnya?
+
+> **Hati-hati dengan data sensitif.** Rencana query memuat nama tabel, kolom, dan sering nilai literal. Jangan menempel rencana dari produksi ke layanan publik tanpa menyamarkannya. Pilih opsi "jangan publikasikan ke arsip" bila tersedia, atau jalankan PEV2 sendiri secara lokal.
 
 ## Latihan
 

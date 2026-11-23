@@ -19,6 +19,8 @@
   - [Queue dengan SKIP LOCKED](#queue-dengan-skip-locked)
   - [Keyset Pagination vs OFFSET](#keyset-pagination-vs-offset)
   - [Migrasi Aman dan Bulk Load](#migrasi-aman-dan-bulk-load)
+  - [Tool Migrasi dengan Flyway (Opsional)](#tool-migrasi-dengan-flyway-opsional)
+  - [Queue dengan PgQ (Opsional)](#queue-dengan-pgq-opsional)
 - [Latihan](#latihan)
 
 ---
@@ -124,6 +126,31 @@ RETURNING a.*;
 | **PgQ**, library queue (mis. pgmq, River, Graphile Worker) | Fitur lebih lengkap (retry, scheduling) |
 | Kafka / RabbitMQ | Throughput sangat tinggi, banyak konsumen, replay (course Kafka) |
 
+**Mengenal PgQ.** PgQ adalah sistem antrean berbasis PostgreSQL yang awalnya dikembangkan di Skype dan menjadi bagian dari SkyTools. Londiste (replikasi berbasis trigger) dibangun di atasnya. Ia terdiri dari tiga lapisan:
+
+| Lapisan | Peran |
+|---|---|
+| **Producer** | Aplikasi memasukkan event dengan `pgq.insert_event(queue, tipe, data)` di dalam transaksi yang sama dengan perubahan datanya |
+| **Ticker** | Daemon (`pgqd`) yang secara berkala membuat *tick*; antara dua tick, event dikelompokkan menjadi satu **batch** |
+| **Consumer** | Mendaftar dengan `pgq.register_consumer`, mengambil batch lewat `pgq.next_batch`, memproses event, lalu menutup batch dengan `pgq.finish_batch` |
+
+Ciri khas PgQ dibanding pola `SKIP LOCKED`:
+
+- Event ditulis ke tabel yang **dirotasi**, bukan di-`UPDATE`/`DELETE` satu per satu, sehingga hampir tanpa *bloat*.
+- Beberapa consumer bisa membaca antrean yang sama, masing-masing dengan posisinya sendiri.
+- Jaminannya **at-least-once**: batch yang belum di-`finish_batch` akan dikirim ulang, jadi consumer harus **idempoten**.
+- **Ticker harus selalu berjalan.** Tanpa ticker, tidak ada batch baru dan tabel antrean tidak dirotasi.
+
+Anti-pola antrean di PostgreSQL:
+
+| Anti-pola | Akibat | Alternatif |
+|---|---|---|
+| `SELECT ... LIMIT 1` tanpa `FOR UPDATE SKIP LOCKED` | Dua worker mengambil tugas yang sama, atau saling menunggu lock | `FOR UPDATE SKIP LOCKED` |
+| Menyimpan tugas selesai selamanya dalam tabel yang sama | Tabel membengkak, scan antrean melambat | Hapus atau arsipkan berkala; partisi per waktu |
+| Polling dengan `sleep` sangat singkat | Beban query sia-sia | `LISTEN`/`NOTIFY` atau interval polling yang wajar |
+| Worker menahan transaksi saat memproses lama | Menahan `VACUUM` dan lock | Tandai tugas `diproses` lalu commit; beri batas waktu (*visibility timeout*) |
+| Consumer tidak idempoten | Efek ganda saat terjadi retry | Kunci idempotensi, mis. `ON CONFLICT DO NOTHING` |
+
 ### 11.6 Pola Pagination
 
 | Pola | Kelebihan | Kekurangan |
@@ -153,6 +180,33 @@ RETURNING a.*;
 | `CREATE INDEX CONCURRENTLY` | Tidak memblokir tulis |
 | Tambah kolom `NOT NULL` | Tambah nullable → isi bertahap (batch) → `SET NOT NULL` (gunakan `CHECK ... NOT VALID` lalu `VALIDATE CONSTRAINT`) |
 | **Expand → Migrate → Contract** | Tambah struktur baru, pindahkan data & kode, baru hapus struktur lama — aman untuk deploy tanpa downtime |
+
+**Anti-pola migrasi**
+
+| Anti-pola | Mengapa berbahaya | Praktik yang benar |
+|---|---|---|
+| Mengubah file migrasi yang sudah dijalankan | Checksum tidak cocok; lingkungan berbeda menyimpang | Buat migrasi baru yang memperbaiki |
+| Menjalankan DDL manual di produksi | Tidak tercatat, tidak bisa diulang di staging | Semua perubahan lewat tool migrasi dan Git |
+| `RENAME COLUMN` langsung | Versi aplikasi lama langsung rusak | Expand → Migrate → Contract |
+| `DROP COLUMN` sebelum kode berhenti memakainya | Error pada aplikasi yang masih berjalan | Rilis kode dulu, hapus kolom di rilis berikutnya |
+| `UPDATE` jutaan baris dalam satu transaksi | Lock lama, WAL besar, bloat | Batch bertahap (mis. 10.000 baris per iterasi) |
+| `CREATE INDEX` tanpa `CONCURRENTLY` pada tabel ramai | Memblokir penulisan | `CREATE INDEX CONCURRENTLY` (tidak bisa di dalam transaksi) |
+| `ADD COLUMN ... DEFAULT` dengan fungsi *volatile* | Menulis ulang seluruh tabel | Default konstan (sejak PG 11 instan), isi nilai lain secara bertahap |
+| Tanpa rencana mundur | Tidak bisa kembali saat gagal | Siapkan migrasi *forward-fix* atau skrip rollback yang diuji |
+
+**Tool migrasi**
+
+| Tool | Cara mendefinisikan migrasi | Contoh |
+|---|---|---|
+| **Flyway** | File SQL berversi pada folder | `V1__buat_tabel.sql`, `V2__tambah_index.sql` |
+| **Liquibase** | *Changelog* YAML/XML/SQL berisi *changeset* | `databaseChangeLog: - changeSet: {id: 1, author: budi, ...}` |
+| **Alembic** (Python/SQLAlchemy) | Skrip Python dengan `upgrade()` dan `downgrade()` | `alembic revision -m "tambah merek"` lalu `alembic upgrade head` |
+| **golang-migrate** | Pasangan file `up`/`down` | `000001_init.up.sql`, `000001_init.down.sql`; `migrate -path db/migrations -database "$URL" up` |
+| **Sqitch** | Skrip `deploy`/`revert`/`verify` tanpa nomor versi (berbasis dependensi) | `sqitch add tambah_merek -n "Tambah kolom merek"` |
+| **Atlas** | Deklaratif: bandingkan skema yang diinginkan dengan database lalu hasilkan migrasi | `atlas migrate diff`, `atlas migrate apply` |
+| Migrasi bawaan framework | Rails, Django, Prisma, Laravel | `python manage.py migrate` |
+
+Pilih satu tool per proyek, jalankan di pipeline CI/CD, dan pastikan migrasi diuji terhadap salinan data berukuran realistis.
 
 ### 11.9 Tuning Berdasarkan Beban Kerja
 
@@ -242,6 +296,67 @@ CREATE UNLOGGED TABLE staging_produk (LIKE produk INCLUDING ALL);
 \copy staging_produk FROM 'produk_full.csv' WITH (FORMAT csv, HEADER true)
 ```
 
+### Tool Migrasi dengan Flyway (Opsional)
+
+Flyway dijalankan lewat Docker dan terhubung ke container `pg-latihan` melalui jaringan Docker khusus:
+
+```bash
+docker network create migrasi-net
+docker network connect migrasi-net pg-latihan
+
+mkdir -p sql
+cat > sql/V1__tambah_kolom_catatan.sql <<'EOF'
+ALTER TABLE app.produk ADD COLUMN IF NOT EXISTS catatan text;
+EOF
+cat > sql/V2__index_nama_produk.sql <<'EOF'
+CREATE INDEX IF NOT EXISTS idx_produk_nama ON app.produk (nama);
+EOF
+
+docker run --rm --network migrasi-net -v "$PWD/sql:/flyway/sql" flyway/flyway \
+  -url=jdbc:postgresql://pg-latihan:5432/toko -user=postgres -password=rahasia \
+  -baselineOnMigrate=true -baselineVersion=0 migrate
+
+docker run --rm --network migrasi-net -v "$PWD/sql:/flyway/sql" flyway/flyway \
+  -url=jdbc:postgresql://pg-latihan:5432/toko -user=postgres -password=rahasia info
+
+docker exec pg-latihan psql -U postgres -d toko -c "SELECT version, description, success FROM flyway_schema_history;"
+```
+
+`-baselineOnMigrate` diperlukan karena database `toko` sudah berisi tabel sebelum Flyway dipakai. Ubah isi `V1__...sql` setelah dijalankan dan jalankan `migrate` lagi: Flyway menolak karena checksum berubah. Itulah alasan aturan "jangan mengubah migrasi yang sudah berjalan".
+
+Pembersihan: `docker network disconnect migrasi-net pg-latihan && docker network rm migrasi-net`.
+
+### Queue dengan PgQ (Opsional)
+
+PgQ adalah ekstensi yang tidak ada di image `postgres` resmi. Pasang paket PGDG ke container latihan (nama paket berbentuk `postgresql-<versi>-pgq3`; cek dengan `apt-cache search pgq` bila tidak ditemukan untuk versi Anda):
+
+```bash
+docker exec -u root pg-latihan bash -c 'apt-get update -qq && apt-get install -y -qq postgresql-18-pgq3'
+docker exec pg-latihan psql -U postgres -d toko -c "CREATE EXTENSION pgq;"
+```
+
+```sql
+SELECT pgq.create_queue('pesanan_baru');
+SELECT pgq.register_consumer('pesanan_baru', 'worker_email');
+
+-- Producer
+SELECT pgq.insert_event('pesanan_baru', 'dibuat', '{"pesanan_id": 1}');
+SELECT pgq.insert_event('pesanan_baru', 'dibuat', '{"pesanan_id": 2}');
+
+-- Ticker: pada sistem nyata dikerjakan daemon pgqd; di latihan kita picu manual
+SELECT pgq.ticker();
+
+-- Consumer
+SELECT pgq.next_batch('pesanan_baru', 'worker_email');       -- mengembalikan batch_id, misalnya 1
+SELECT ev_id, ev_type, ev_data FROM pgq.get_batch_events(1); -- ganti 1 dengan batch_id Anda
+SELECT pgq.finish_batch(1);
+
+-- Status consumer
+SELECT * FROM pgq.get_consumer_info();
+```
+
+Jika `next_batch` mengembalikan `NULL`, belum ada tick baru: jalankan `pgq.ticker()` lagi. Jalankan `next_batch` sekali lagi **tanpa** `finish_batch` pada batch baru dan perhatikan bahwa batch yang sama dikirim ulang (*at-least-once*).
+
 ## Latihan
 
 1. Diberikan tabel `pesanan_lama(id, pelanggan_nama, pelanggan_alamat, produk_nama, produk_harga, jumlah)`, normalisasikan hingga 3NF dan gambarkan tabel hasilnya beserta relasinya.
@@ -250,6 +365,9 @@ CREATE UNLOGGED TABLE staging_produk (LIKE produk INCLUDING ALL);
 4. Implementasikan *job queue* dengan `SKIP LOCKED`, tambahkan kolom `percobaan` dan logika retry hingga 3 kali sebelum status `gagal`.
 5. Bandingkan waktu memuat 100.000 baris dengan (a) 100.000 `INSERT` terpisah, (b) satu `INSERT` multi-baris, (c) `COPY`. Catat hasilnya.
 6. Diskusikan: sebuah toko online tumbuh dari 1 juta ke 1 miliar baris pesanan. Urutkan langkah-langkah skala (index, partisi, replica, sharding, arsip) dan jelaskan kapan masing-masing mulai diperlukan.
+7. Buat tiga migrasi Flyway: (a) tambah kolom `merek` nullable, (b) isi bertahap, (c) tambah constraint `NOT NULL` lewat `CHECK ... NOT VALID` dan `VALIDATE`. Jelaskan mengapa ketiganya dipisah menjadi migrasi terpisah.
+8. Bandingkan antrean `SKIP LOCKED` dan PgQ: sebutkan dua situasi di mana PgQ lebih unggul dan satu situasi di mana `SKIP LOCKED` cukup.
+9. Daftar tiga anti-pola migrasi yang pernah atau mungkin Anda temui di proyek Anda, dan tuliskan versi aman untuk masing-masing.
 
 ---
 

@@ -17,6 +17,7 @@
   - [Index Komposit, Partial, Expression, Covering](#index-komposit-partial-expression-covering)
   - [GIN untuk JSONB dan Trigram](#gin-untuk-jsonb-dan-trigram)
   - [BRIN dan Audit Index](#brin-dan-audit-index)
+  - [Hash Index](#hash-index)
 - [Latihan](#latihan)
 
 ---
@@ -51,7 +52,21 @@
 CREATE INDEX idx_pesanan_pelanggan ON pesanan (pelanggan_id);                  -- B-Tree
 CREATE INDEX idx_dokumen_gin ON dokumen USING gin (data jsonb_path_ops);       -- GIN
 CREATE INDEX idx_log_brin ON log_aktivitas USING brin (dibuat_pada);           -- BRIN
+CREATE INDEX idx_sesi_token_hash ON sesi USING hash (token);                    -- Hash
 ```
+
+**Catatan tentang Hash index.** Index ini menyimpan *hash* dari nilai kolom, bukan nilai aslinya, sehingga hanya bisa menjawab pencarian kesamaan (`=`).
+
+| Aspek | Hash | B-Tree |
+|---|---|---|
+| Operator | Hanya `=` | `=`, `<`, `>`, `BETWEEN`, `LIKE 'abc%'` |
+| `ORDER BY` | Tidak bisa dilayani | Bisa |
+| `UNIQUE` / multi-kolom | Tidak didukung | Didukung |
+| Index-only scan | Tidak | Ya |
+| Ukuran untuk kunci panjang (URL, token) | Bisa lebih kecil, karena yang disimpan adalah hash | Tumbuh mengikuti panjang kunci |
+| Keamanan crash & replikasi | Aman sejak PostgreSQL 10 (dicatat di WAL) | Aman |
+
+Sebelum PostgreSQL 10, hash index tidak dicatat di WAL sehingga tidak aman saat crash dan tidak ikut direplikasi. Itu sebabnya banyak materi lama menyarankan untuk menghindarinya. Kini batasan itu sudah hilang, tetapi B-Tree tetap pilihan default karena lebih fleksibel dan, pada kebanyakan kasus, kecepatannya setara.
 
 ### 9.3 Varian dan Teknik Index
 
@@ -179,6 +194,31 @@ SELECT relname, indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrel
 FROM pg_stat_user_indexes ORDER BY idx_scan;
 ```
 
+### Hash Index
+
+```sql
+CREATE INDEX idx_trx_email_hash ON transaksi USING hash (email);
+CREATE INDEX idx_trx_email_btree ON transaksi (email);
+
+-- Bandingkan ukuran kedua index
+SELECT indexrelname, pg_size_pretty(pg_relation_size(indexrelid)) AS ukuran
+FROM pg_stat_user_indexes
+WHERE indexrelname IN ('idx_trx_email_hash', 'idx_trx_email_btree');
+
+-- Pencarian kesamaan: kedua index bisa dipakai, planner memilih yang lebih murah
+EXPLAIN ANALYZE SELECT * FROM transaksi WHERE email = 'user500@contoh.com';
+
+-- Hash index tidak bisa dipakai untuk prefix maupun rentang
+EXPLAIN ANALYZE SELECT * FROM transaksi WHERE email LIKE 'user500%';
+EXPLAIN ANALYZE SELECT * FROM transaksi WHERE email > 'user9';
+
+-- Paksa planner memakai hash index dengan menghapus B-Tree, lalu ulangi query pertama
+DROP INDEX idx_trx_email_btree;
+EXPLAIN ANALYZE SELECT * FROM transaksi WHERE email = 'user500@contoh.com';
+```
+
+Perhatikan node pada hasil `EXPLAIN` (`Index Scan using idx_trx_email_hash` atau `Bitmap Index Scan`) dan bandingkan ukuran kedua index.
+
 ## Latihan
 
 1. Ukur waktu query `WHERE pelanggan_id = X` sebelum dan sesudah index. Hitung berapa kali lebih cepat, dan ukur waktu `INSERT` 100.000 baris tambahan dengan dan tanpa index tersebut untuk melihat harga yang dibayar.
@@ -187,6 +227,7 @@ FROM pg_stat_user_indexes ORDER BY idx_scan;
 4. Query `WHERE lower(email) = ...` tidak memakai index biasa pada `email`. Buktikan dengan `EXPLAIN`, lalu perbaiki dengan expression index.
 5. Cari semua index yang **tidak pernah dipakai** (`idx_scan = 0`) di database latihan Anda. Apa risiko menghapusnya di produksi, dan data apa lagi yang perlu Anda periksa dulu (petunjuk: replica, periode statistik)?
 6. Diskusikan: kapan BRIN lebih tepat daripada B-Tree untuk tabel log 5 miliar baris, dan syarat apa yang harus dipenuhi data agar BRIN efektif?
+7. Buat hash index dan B-Tree pada kolom teks panjang (mis. 200 karakter acak), bandingkan ukurannya, lalu jelaskan kapan hash index masuk akal dan apa yang hilang jika Anda memilihnya (petunjuk: `ORDER BY`, `UNIQUE`, index-only scan).
 
 ---
 
