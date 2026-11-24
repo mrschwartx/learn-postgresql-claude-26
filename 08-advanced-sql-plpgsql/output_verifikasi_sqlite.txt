@@ -1,0 +1,133 @@
+
+==============================================================================
+A. Praktik: window function (dibandingkan dengan hitungan Python)
+==============================================================================
+[OK] total_berjalan, total_sebelumnya, peringkat per baris (12 baris)
+       aktual   : [(1, 1, '2026-01-04', 500000, 500000, None, 6), (3, 1, '2026-01-10', 750000, 1250000, 500000, 3), (6, 1, '2026-01-19', 600000, 1850000, 750000, 5), (10, 1, '2026-01-31', 800000, 2650000, 600000, 2), (2, 2, '2026-01-07', 300000, 300000, None, 10), (5, 2, '2026-01-16', 450000, 750000, 300000, 7), (9, 2, '2026-01-28', 250000, 1000000, 450000, 11), (4, 3, '2026-01-13', 200000, 200000, None, 12), (8, 3, '2026-01-25', 350000, 550000, 200000, 9), (12, 3, '2026-02-06', 650000, 1200000, 350000, 4), (7, 4, '2026-01-22', 900000, 900000, None, 1), (11, 4, '2026-02-03', 400000, 1300000, 900000, 8)]
+       harapan  : [(1, 1, '2026-01-04', 500000, 500000, None, 6), (3, 1, '2026-01-10', 750000, 1250000, 500000, 3), (6, 1, '2026-01-19', 600000, 1850000, 750000, 5), (10, 1, '2026-01-31', 800000, 2650000, 600000, 2), (2, 2, '2026-01-07', 300000, 300000, None, 10), (5, 2, '2026-01-16', 450000, 750000, 300000, 7), (9, 2, '2026-01-28', 250000, 1000000, 450000, 11), (4, 3, '2026-01-13', 200000, 200000, None, 12), (8, 3, '2026-01-25', 350000, 550000, 200000, 9), (12, 3, '2026-02-06', 650000, 1200000, 350000, 4), (7, 4, '2026-01-22', 900000, 900000, None, 1), (11, 4, '2026-02-03', 400000, 1300000, 900000, 8)]
+[OK] Top-2 per pelanggan (row_number)
+       aktual   : [(1, 10, 800000), (1, 3, 750000), (2, 5, 450000), (2, 2, 300000), (3, 12, 650000), (3, 8, 350000), (4, 7, 900000), (4, 11, 400000)]
+       harapan  : [(1, 10, 800000), (1, 3, 750000), (2, 5, 450000), (2, 2, 300000), (3, 12, 650000), (3, 8, 350000), (4, 7, 900000), (4, 11, 400000)]
+[CATATAN] median (percentile_cont) tidak ada di SQLite. Hitungan Python: 475000  -> nilai yang diharapkan dari PostgreSQL untuk data ini (tipe double precision).
+
+==============================================================================
+B. Praktik: recursive CTE (struktur organisasi)
+==============================================================================
+[OK] pohon organisasi diurut menurut jalur
+       aktual   : [(0, 'Direktur'), (1, 'Direktur > Manajer A'), (2, 'Direktur > Manajer A > Staf A1'), (2, 'Direktur > Manajer A > Staf A2'), (1, 'Direktur > Manajer B'), (2, 'Direktur > Manajer B > Staf B1')]
+       harapan  : [(0, 'Direktur'), (1, 'Direktur > Manajer A'), (2, 'Direktur > Manajer A > Staf A1'), (2, 'Direktur > Manajer A > Staf A2'), (1, 'Direktur > Manajer B'), (2, 'Direktur > Manajer B > Staf B1')]
+[CATATAN] Urutan memakai perbandingan biner di SQLite. Di PostgreSQL urutan teks mengikuti collation database;
+          untuk urutan pohon yang pasti, urutkan dengan array jalur (ARRAY[id]) alih-alih teks.
+
+==============================================================================
+C. Latihan 1: pertumbuhan bulanan
+==============================================================================
+[OK] bulan, total, total_sebelumnya, persen
+       aktual   : [('2026-01-01', 5100000, None, None), ('2026-02-01', 1050000, 5100000, -79.41)]
+       harapan  : [('2026-01-01', 5100000, None, None), ('2026-02-01', 1050000, 5100000, -79.41)]
+
+==============================================================================
+D. Latihan 2: Top-3 produk terlaris per kategori
+==============================================================================
+[OK] qty terjual per produk (pesanan batal dikecualikan; HP hanya ada di pesanan batal)
+       aktual   : [('Laptop 14 inci', 1), ('Mouse Nirkabel', 3), ('Keyboard Mekanik', 1), ('Monitor 24 inci', 2), ('Headset', 0)]
+       harapan  : [('Laptop 14 inci', 1), ('Mouse Nirkabel', 3), ('Keyboard Mekanik', 1), ('Monitor 24 inci', 2), ('Headset', 0)]
+[OK] satu kategori 'umum': 3 teratas
+       aktual   : [('umum', 'Mouse Nirkabel', 3), ('umum', 'Monitor 24 inci', 2), ('umum', 'Laptop 14 inci', 1)]
+       harapan  : [('umum', 'Mouse Nirkabel', 3), ('umum', 'Monitor 24 inci', 2), ('umum', 'Laptop 14 inci', 1)]
+[OK] tiga kategori (row_number)
+       aktual   : [('aksesori', 'Mouse Nirkabel', 3), ('aksesori', 'Keyboard Mekanik', 1), ('komputer', 'Monitor 24 inci', 2), ('komputer', 'Laptop 14 inci', 1), ('umum', 'Headset', 0)]
+       harapan  : [('aksesori', 'Mouse Nirkabel', 3), ('aksesori', 'Keyboard Mekanik', 1), ('komputer', 'Monitor 24 inci', 2), ('komputer', 'Laptop 14 inci', 1), ('umum', 'Headset', 0)]
+[OK][PADANAN] padanan LATERAL (loop per kategori + LIMIT 3) = hasil row_number
+       aktual   : [('aksesori', 'Mouse Nirkabel', 3), ('aksesori', 'Keyboard Mekanik', 1), ('komputer', 'Monitor 24 inci', 2), ('komputer', 'Laptop 14 inci', 1), ('umum', 'Headset', 0)]
+       harapan  : [('aksesori', 'Mouse Nirkabel', 3), ('aksesori', 'Keyboard Mekanik', 1), ('komputer', 'Monitor 24 inci', 2), ('komputer', 'Laptop 14 inci', 1), ('umum', 'Headset', 0)]
+
+==============================================================================
+E. Praktik + Latihan 3: fungsi PL/pgSQL (ditiru Python + SAVEPOINT)
+==============================================================================
+[OK][PADANAN] kurangi_stok(1, 2) mengembalikan sisa stok Laptop (10 - 2)
+       aktual   : 8
+       harapan  : 8
+[OK][PADANAN] kurangi_stok(1, 9999) gagal dengan pesan stok tidak cukup
+       aktual   : Stok tidak cukup (8 < 9999)
+       harapan  : Stok tidak cukup (8 < 9999)
+[OK] keadaan awal (pesanan, item, stok Monitor)
+       aktual   : (5, 6, 5)
+       harapan  : (5, 6, 5)
+[OK][PADANAN] buat_pesanan gagal: stok tidak cukup
+       aktual   : True
+       harapan  : True
+[OK][PADANAN]    tidak ada data setengah jadi
+       aktual   : (5, 6, 5)
+       harapan  : (5, 6, 5)
+[OK][PADANAN] buat_pesanan gagal: pelanggan 999 tidak ada: stok SUDAH dikurangi, INSERT pesanan gagal (FK)
+       aktual   : True
+       harapan  : True
+[OK][PADANAN]    tidak ada data setengah jadi
+       aktual   : (5, 6, 5)
+       harapan  : (5, 6, 5)
+[OK][PADANAN] buat_pesanan gagal: jumlah 0
+       aktual   : True
+       harapan  : True
+[OK][PADANAN]    tidak ada data setengah jadi
+       aktual   : (5, 6, 5)
+       harapan  : (5, 6, 5)
+[OK][PADANAN] buat_pesanan(2, 4, 2) berhasil: +1 pesanan, +1 item, stok Monitor 5 -> 3
+       aktual   : (6, 7, 3)
+       harapan  : (6, 7, 3)
+[OK][PADANAN] satu transaksi sukses+gagal lalu ROLLBACK: kembali ke keadaan awal
+       aktual   : (5, 6, 5)
+       harapan  : (5, 6, 5)
+
+==============================================================================
+F. Latihan 4: trigger pencegah DELETE pelanggan (ditiru trigger SQLite)
+==============================================================================
+[OK][PADANAN] FK biasa + trigger: Budi (pesanan 'baru') ditolak oleh TRIGGER
+       aktual   : masih punya pesanan aktif
+       harapan  : masih punya pesanan aktif
+[OK][PADANAN] FK biasa + trigger: Andi (selesai + dibayar) ditolak oleh TRIGGER
+       aktual   : masih punya pesanan aktif
+       harapan  : masih punya pesanan aktif
+[OK][PADANAN] FK biasa + trigger: Dedi (hanya 'batal') lolos trigger tetapi DITOLAK FK
+       aktual   : FOREIGN KEY constraint failed
+       harapan  : FOREIGN KEY constraint failed
+[OK][PADANAN] FK biasa tanpa trigger: Budi ditolak oleh FK saja (pesan generik)
+       aktual   : FOREIGN KEY constraint failed
+       harapan  : FOREIGN KEY constraint failed
+[OK][PADANAN] FK CASCADE + trigger: Budi tetap ditolak trigger
+       aktual   : masih punya pesanan aktif
+       harapan  : masih punya pesanan aktif
+[OK][PADANAN] FK CASCADE + trigger: Dedi (hanya batal) dihapus
+       aktual   : dihapus
+       harapan  : dihapus
+[OK][PADANAN]    pesanan Dedi ikut terhapus (CASCADE): pelanggan, pesanan, item
+       aktual   : (3, 4, 5)
+       harapan  : (3, 4, 5)
+[OK][PADANAN] FK CASCADE TANPA trigger: Budi dihapus bersama pesanan aktifnya (bahaya)
+       aktual   : dihapus
+       harapan  : dihapus
+
+==============================================================================
+G. Praktik: audit trigger (logika IS DISTINCT FROM)
+==============================================================================
+[OK][PADANAN] UPDATE tanpa perubahan harga tidak mencatat audit
+       aktual   : 0
+       harapan  : 0
+[OK][PADANAN] harga Mouse +5000 mencatat satu baris audit
+       aktual   : [(2, 165000, 170000)]
+       harapan  : [(2, 165000, 170000)]
+
+==============================================================================
+H. Latihan 5: tanggal satu bulan dengan WITH RECURSIVE
+==============================================================================
+[OK] 2026-11: 30 tanggal, sama dengan kalender
+       aktual   : ['2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14', '2026-11-15', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29', '2026-11-30']
+       harapan  : ['2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14', '2026-11-15', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29', '2026-11-30']
+[OK] 2028-02: 29 tanggal, sama dengan kalender
+       aktual   : ['2028-02-01', '2028-02-02', '2028-02-03', '2028-02-04', '2028-02-05', '2028-02-06', '2028-02-07', '2028-02-08', '2028-02-09', '2028-02-10', '2028-02-11', '2028-02-12', '2028-02-13', '2028-02-14', '2028-02-15', '2028-02-16', '2028-02-17', '2028-02-18', '2028-02-19', '2028-02-20', '2028-02-21', '2028-02-22', '2028-02-23', '2028-02-24', '2028-02-25', '2028-02-26', '2028-02-27', '2028-02-28', '2028-02-29']
+       harapan  : ['2028-02-01', '2028-02-02', '2028-02-03', '2028-02-04', '2028-02-05', '2028-02-06', '2028-02-07', '2028-02-08', '2028-02-09', '2028-02-10', '2028-02-11', '2028-02-12', '2028-02-13', '2028-02-14', '2028-02-15', '2028-02-16', '2028-02-17', '2028-02-18', '2028-02-19', '2028-02-20', '2028-02-21', '2028-02-22', '2028-02-23', '2028-02-24', '2028-02-25', '2028-02-26', '2028-02-27', '2028-02-28', '2028-02-29']
+[OK] 2026-02: 28 tanggal, sama dengan kalender
+       aktual   : ['2026-02-01', '2026-02-02', '2026-02-03', '2026-02-04', '2026-02-05', '2026-02-06', '2026-02-07', '2026-02-08', '2026-02-09', '2026-02-10', '2026-02-11', '2026-02-12', '2026-02-13', '2026-02-14', '2026-02-15', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', '2026-02-23', '2026-02-24', '2026-02-25', '2026-02-26', '2026-02-27', '2026-02-28']
+       harapan  : ['2026-02-01', '2026-02-02', '2026-02-03', '2026-02-04', '2026-02-05', '2026-02-06', '2026-02-07', '2026-02-08', '2026-02-09', '2026-02-10', '2026-02-11', '2026-02-12', '2026-02-13', '2026-02-14', '2026-02-15', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', '2026-02-23', '2026-02-24', '2026-02-25', '2026-02-26', '2026-02-27', '2026-02-28']
+
+Semua 32 pemeriksaan sesuai harapan.
