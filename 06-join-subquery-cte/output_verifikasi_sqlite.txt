@@ -1,0 +1,122 @@
+
+==============================================================================
+A. Praktik
+==============================================================================
+[OK] INNER JOIN pelanggan-pesanan (5 baris)
+       aktual   : [('Andi', 1, 'selesai'), ('Andi', 2, 'dibayar'), ('Budi', 3, 'baru'), ('Citra', 4, 'selesai'), ('Dedi', 5, 'batal')]
+       harapan  : [('Andi', 1, 'selesai'), ('Andi', 2, 'dibayar'), ('Budi', 3, 'baru'), ('Citra', 4, 'selesai'), ('Dedi', 5, 'batal')]
+[OK] LEFT JOIN + count(p.id)
+       aktual   : {'Andi': 2, 'Budi': 1, 'Citra': 1, 'Dedi': 1}
+       harapan  : {'Andi': 2, 'Budi': 1, 'Citra': 1, 'Dedi': 1}
+[OK] JOIN 4 tabel: 6 baris detail
+       aktual   : [(1, 'Andi', 'Laptop 14 inci', 1, 12500000), (1, 'Andi', 'Mouse Nirkabel', 2, 300000), (2, 'Andi', 'Keyboard Mekanik', 1, 850000), (3, 'Budi', 'Mouse Nirkabel', 1, 150000), (4, 'Citra', 'Monitor 24 inci', 2, 4400000), (5, 'Dedi', 'Headset', 1, 450000)]
+       harapan  : [(1, 'Andi', 'Laptop 14 inci', 1, 12500000), (1, 'Andi', 'Mouse Nirkabel', 2, 300000), (2, 'Andi', 'Keyboard Mekanik', 1, 850000), (3, 'Budi', 'Mouse Nirkabel', 1, 150000), (4, 'Citra', 'Monitor 24 inci', 2, 4400000), (5, 'Dedi', 'Headset', 1, 450000)]
+[OK] GROUP BY status
+       aktual   : {'baru': 1, 'batal': 1, 'dibayar': 1, 'selesai': 2}
+       harapan  : {'selesai': 2, 'dibayar': 1, 'baru': 1, 'batal': 1}
+[OK] count(*) FILTER (WHERE status='selesai')
+       aktual   : [(5, 2)]
+       harapan  : [(5, 2)]
+[OK][PADANAN] ROLLUP (nama, status): 5 detail + 4 subtotal + 1 grand total = 10 baris
+       aktual   : [('Andi', 'dibayar', 1), ('Andi', 'selesai', 1), ('Andi', None, 2), ('Budi', 'baru', 1), ('Budi', None, 1), ('Citra', 'selesai', 1), ('Citra', None, 1), ('Dedi', 'batal', 1), ('Dedi', None, 1), (None, None, 5)]
+       harapan  : [('Andi', 'dibayar', 1), ('Andi', 'selesai', 1), ('Andi', None, 2), ('Budi', 'baru', 1), ('Budi', None, 1), ('Citra', 'selesai', 1), ('Citra', None, 1), ('Dedi', 'batal', 1), ('Dedi', None, 1), (None, None, 5)]
+[OK] produk di atas harga rata-rata (3.233.000)
+       aktual   : [('Laptop 14 inci',)]
+       harapan  : [('Laptop 14 inci',)]
+[OK] produk yang belum pernah dipesan (NOT EXISTS): kosong pada seed
+       aktual   : []
+       harapan  : []
+[OK] EXCEPT id produk - produk_id item: kosong pada seed
+       aktual   : []
+       harapan  : []
+[OK] CTE total belanja per pelanggan
+       aktual   : [('Andi', 13650000), ('Citra', 4400000), ('Dedi', 450000), ('Budi', 150000)]
+       harapan  : [('Andi', 13650000), ('Citra', 4400000), ('Dedi', 450000), ('Budi', 150000)]
+[OK] TEMUAN: dua pesanan Andi punya dibuat_pada IDENTIK (now() = awal transaksi)
+       aktual   : 1
+       harapan  : 1
+[OK][PADANAN] pesanan terbaru per pelanggan dengan pemutus seri (id DESC)
+       aktual   : [('Andi', 2), ('Budi', 3), ('Citra', 4), ('Dedi', 5)]
+       harapan  : [('Andi', 2), ('Budi', 3), ('Citra', 4), ('Dedi', 5)]
+[OK] UNION ALL: pelanggan @contoh.com + produk > 1 juta (5 baris)
+       aktual   : [('Andi',), ('Budi',), ('Citra',), ('Laptop 14 inci',), ('Monitor 24 inci',)]
+       harapan  : [('Andi',), ('Budi',), ('Citra',), ('Laptop 14 inci',), ('Monitor 24 inci',)]
+
+==============================================================================
+B. Latihan 1: total belanja termasuk pelanggan tanpa belanja
+==============================================================================
+[OK] total per pelanggan, Eka = 0
+       aktual   : [('Andi', 13650000), ('Citra', 4400000), ('Dedi', 450000), ('Budi', 150000), ('Eka', 0)]
+       harapan  : [('Andi', 13650000), ('Citra', 4400000), ('Dedi', 450000), ('Budi', 150000), ('Eka', 0)]
+[OK] jebakan: count(*) menghitung 1 untuk Eka, count(p.id) menghitung 0
+       aktual   : [(1, 0)]
+       harapan  : [(1, 0)]
+
+==============================================================================
+C. Latihan 2: tiga cara + bahaya NOT IN
+==============================================================================
+[OK] cara 1 LEFT JOIN ... IS NULL
+       aktual   : [('Eka',)]
+       harapan  : [('Eka',)]
+[OK] cara 2 NOT EXISTS
+       aktual   : [('Eka',)]
+       harapan  : [('Eka',)]
+[OK] cara 3 NOT IN (tanpa NULL di subquery)
+       aktual   : [('Eka',)]
+       harapan  : [('Eka',)]
+[OK] NOT IN dengan satu NULL di subquery: KOSONG
+       aktual   : []
+       harapan  : []
+[OK] NOT EXISTS dengan NULL yang sama: tetap benar
+       aktual   : [('Eka',)]
+       harapan  : [('Eka',)]
+[OK] setelah ROLLBACK Eka tidak ada
+       aktual   : 0
+       harapan  : 0
+
+==============================================================================
+D. Latihan 3: 2 produk termahal per kategori
+==============================================================================
+[OK][PADANAN] top-2 per kategori (PADANAN LATERAL dengan row_number())
+       aktual   : [('aksesori', 'Keyboard Mekanik', 850000), ('aksesori', 'Mouse Nirkabel', 165000), ('audio', 'Headset', 450000), ('komputer', 'Laptop 14 inci', 12500000), ('komputer', 'Monitor 24 inci', 2200000)]
+       harapan  : [('aksesori', 'Keyboard Mekanik', 850000), ('aksesori', 'Mouse Nirkabel', 165000), ('audio', 'Headset', 450000), ('komputer', 'Laptop 14 inci', 12500000), ('komputer', 'Monitor 24 inci', 2200000)]
+
+==============================================================================
+E. Latihan 4: memindahkan pesanan batal ke arsip
+==============================================================================
+[CATATAN] CTE data-modifying (WITH ... DELETE ... RETURNING) tidak didukung SQLite.
+          Yang diuji: HASIL AKHIR yang sama lewat INSERT..SELECT lalu DELETE dalam satu transaksi.
+[OK][PADANAN] arsip_pesanan / arsip_item / pesanan aktif / item aktif
+       aktual   : (1, 1, 4, 5)
+       harapan  : (1, 1, 4, 5)
+[OK][PADANAN] pesanan yang diarsipkan = id 5
+       aktual   : [(5, 'batal')]
+       harapan  : [(5, 'batal')]
+[OK] setelah ROLLBACK seed utuh (pesanan, item)
+       aktual   : (5, 6)
+       harapan  : (5, 6)
+
+==============================================================================
+F. Latihan 5: UNION vs UNION ALL
+==============================================================================
+[OK] UNION ALL -> 4 baris
+       aktual   : 4
+       harapan  : 4
+[OK] UNION -> 3 baris
+       aktual   : 3
+       harapan  : 3
+[OK] UNION juga membuang duplikat DI DALAM satu sisi
+       aktual   : 1
+       harapan  : 1
+
+==============================================================================
+G. Latihan 6: GROUP BY dengan kolom bukan agregat
+==============================================================================
+[CATATAN] SQLite MENERIMA query ini (kolom p.status dipilih sembarang per grup), dan menghasilkan 4 baris.
+          PostgreSQL MENOLAK: column "p.status" must appear in the GROUP BY clause or be used in an aggregate function.
+          Jadi penolakan ini tidak bisa dibuktikan di SQLite. Hanya perbaikannya yang diuji:
+[OK] GROUP BY c.id, c.nama (valid di semua DBMS)
+       aktual   : [(1, 'Andi', 2), (2, 'Budi', 1), (3, 'Citra', 1), (4, 'Dedi', 1)]
+       harapan  : [(1, 'Andi', 2), (2, 'Budi', 1), (3, 'Citra', 1), (4, 'Dedi', 1)]
+
+Semua 29 pemeriksaan sesuai harapan.

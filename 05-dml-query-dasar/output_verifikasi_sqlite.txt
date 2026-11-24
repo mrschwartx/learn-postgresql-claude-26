@@ -1,0 +1,117 @@
+==============================================================================
+A. Seed data (seed.sql asli)
+==============================================================================
+[OK] jumlah pelanggan/produk/pesanan/item_pesanan
+       aktual   : (4, 5, 5, 6)
+       harapan  : (4, 5, 5, 6)
+
+==============================================================================
+B. Query dan Filter
+==============================================================================
+[OK] harga BETWEEN 100000 AND 1000000 ORDER BY harga DESC
+       aktual   : [('Keyboard Mekanik', 850000), ('Headset', 450000), ('Mouse Nirkabel', 150000)]
+       harapan  : [('Keyboard Mekanik', 850000), ('Headset', 450000), ('Mouse Nirkabel', 150000)]
+[OK] CASE status_stok
+       aktual   : [('LP-001', 'aman'), ('MS-001', 'aman'), ('KB-001', 'aman'), ('MN-001', 'menipis'), ('HP-001', 'habis')]
+       harapan  : [('LP-001', 'aman'), ('MS-001', 'aman'), ('KB-001', 'aman'), ('MN-001', 'menipis'), ('HP-001', 'habis')]
+[OK] ORDER BY harga DESC LIMIT 3 OFFSET 1
+       aktual   : [('Monitor 24 inci',), ('Keyboard Mekanik',), ('Headset',)]
+       harapan  : [('Monitor 24 inci',), ('Keyboard Mekanik',), ('Headset',)]
+[CATATAN] ILIKE '%mouse%' khas PostgreSQL. LIKE SQLite tidak peka huruf besar/kecil (ASCII), dipakai sebagai pendekatan:
+[OK] LIKE '%mouse%' (pendekatan ILIKE)
+       aktual   : [('Mouse Nirkabel',)]
+       harapan  : [('Mouse Nirkabel',)]
+
+Nilai harga * 1.11 di PostgreSQL (numeric(12,2) * numeric(skala 2) = skala 4), dihitung dengan Decimal:
+   LP-001  13875000.0000
+   MS-001  166500.0000
+   KB-001  943500.0000
+   MN-001  2442000.0000
+   HP-001  499500.0000
+
+==============================================================================
+C. Modifikasi Data
+==============================================================================
+[OK] UPDATE ... RETURNING
+       aktual   : [('MS-001', 99)]
+       harapan  : [('MS-001', 99)]
+[OK] UPSERT ON CONFLICT DO UPDATE ... RETURNING *
+       aktual   : [(2, 'MS-001', 'Mouse Nirkabel', 165000, 80)]
+       harapan  : [(2, 'MS-001', 'Mouse Nirkabel', 165000, 80)]
+[OK] jumlah produk tetap 5 (tidak ada baris baru)
+       aktual   : 5
+       harapan  : 5
+
+==============================================================================
+D. Latihan 1: stok < 20 dengan label
+==============================================================================
+[OK] Latihan 1
+       aktual   : [('HP-001', 'Headset', 0, 'kritis'), ('MN-001', 'Monitor 24 inci', 5, 'rendah'), ('LP-001', 'Laptop 14 inci', 10, 'rendah')]
+       harapan  : [('HP-001', 'Headset', 0, 'kritis'), ('MN-001', 'Monitor 24 inci', 5, 'rendah'), ('LP-001', 'Laptop 14 inci', 10, 'rendah')]
+
+==============================================================================
+E. Latihan 2: upsert menambah stok tanpa membaca stok lama
+==============================================================================
+[OK] stok KB-001: 25 -> 35
+       aktual   : [('KB-001', 35)]
+       harapan  : [('KB-001', 35)]
+[OK] dijalankan lagi (tidak idempoten): 35 -> 45
+       aktual   : [('KB-001', 45)]
+       harapan  : [('KB-001', 45)]
+[OK] baris usulan stok -30 melanggar CHECK (stok >= 0) walau akan di-UPDATE
+       aktual   : ditolak
+       harapan  : ditolak
+
+==============================================================================
+F. Latihan 3: alias di WHERE
+==============================================================================
+[CATATAN] SQLite menerima 'WHERE h > ...' (alias di WHERE), PostgreSQL TIDAK:
+          PostgreSQL -> ERROR: column "h" does not exist. Jadi tahap ini tidak bisa dibuktikan di sini.
+[OK] perbaikan 1: ulangi ekspresi
+       aktual   : [2442000, 13875000]
+       harapan  : [2442000, 13875000]
+[OK] perbaikan 2: subquery
+       aktual   : [2442000, 13875000]
+       harapan  : [2442000, 13875000]
+
+==============================================================================
+G. Latihan 4: DELETE ... RETURNING + cascade + ROLLBACK
+==============================================================================
+[OK] sebelum
+       aktual   : (5, 6)
+       harapan  : (5, 6)
+[OK] DELETE RETURNING id
+       aktual   : [(5,)]
+       harapan  : [(5,)]
+[OK] di dalam transaksi (pesanan 5 dan 1 item-nya hilang)
+       aktual   : (4, 5)
+       harapan  : (4, 5)
+[OK] setelah ROLLBACK
+       aktual   : (5, 6)
+       harapan  : (5, 6)
+
+==============================================================================
+H. Latihan 5: ekspor CSV, ubah harga di file, impor ke tabel sementara, bandingkan
+==============================================================================
+[CATATAN] Logikanya diuji dengan modul csv Python; sintaks \copy hanya bisa dibuktikan di psql.
+isi CSV (harga tampil dengan 2 desimal seperti numeric(12,2) di PostgreSQL):
+   sku,nama,harga,stok
+   HP-001,Headset,450000.00,0
+   KB-001,Keyboard Mekanik,850000.00,25
+   LP-001,Laptop 14 inci,12500000.00,10
+   MN-001,Monitor 24 inci,2200000.00,5
+   MS-001,Mouse Nirkabel,165000.00,80
+[OK] sed pada baris KB-001 mengubah tepat 1 baris
+       aktual   : 1
+       harapan  : 1
+[OK] jumlah baris asli vs impor
+       aktual   : (5, 5)
+       harapan  : (5, 5)
+[OK] baris yang harganya berbeda (IS NOT = IS DISTINCT FROM)
+       aktual   : [('KB-001', 850000, 900000)]
+       harapan  : [('KB-001', 850000, 900000)]
+[OK] EXCEPT dua arah menemukan 2 baris (versi lama dan baru KB-001)
+       aktual   : 2
+       harapan  : 2
+
+Semua 22 pemeriksaan sesuai harapan.
