@@ -1,0 +1,101 @@
+
+==============================================================================
+A. Ukuran tabel uji_bloat dari tata letak halaman [hitungan]
+==============================================================================
+t_len=129, setelah MAXALIGN=136, plus item pointer=140, tuple per halaman=58
+[OK] [hitungan] tuple per halaman
+       aktual   : 58
+       harapan  : 58
+Praktik (200.000 baris): 3,449 halaman = 28,254,208 byte = 27 MB
+Latihan 2 (1 juta baris): 17,242 halaman = 141,246,464 byte = 135 MB
+[OK] [hitungan] halaman dan ukuran Praktik
+       aktual   : (3449, '27 MB')
+       harapan  : (3449, '27 MB')
+[OK] [hitungan] halaman dan ukuran Latihan 2 (awal)
+       aktual   : (17242, '135 MB')
+       harapan  : (17242, '135 MB')
+[OK] [hitungan] halaman penuh hanya menyisakan ruang lebih kecil dari satu tuple, sehingga UPDATE tidak bisa memakai halaman yang sama (bukan HOT) dan versi baru menambah halaman
+       sisa 48 byte < 140 byte per tuple
+sesudah UPDATE seluruh baris: ≈ 34,484 halaman ≈ 269 MB (≈ 2x)
+[OK] [hitungan] ukuran setelah UPDATE seluruh baris ≈ 2x
+       aktual   : 269 MB
+       harapan  : 269 MB
+[OK] [hitungan] setelah VACUUM, 1 juta tuple baru muat persis di halaman yang dibebaskan, sehingga UPDATE kedua hampir tidak menambah file
+       17,242 halaman x 58 = 1,000,036 >= 1.000.000
+
+==============================================================================
+B. Ambang autovacuum [hitungan]
+==============================================================================
+[OK] [hitungan] VACUUM untuk uji_bloat 200.000 baris (default 50 + 0,2 x baris)
+       aktual   : 40050.0
+       harapan  : 40050.0
+[OK] [hitungan] VACUUM untuk tabel 1 juta baris
+       aktual   : 200050.0
+       harapan  : 200050.0
+[OK] [hitungan] VACUUM transaksi 1,2 juta baris, default
+       aktual   : 240050.0
+       harapan  : 240050.0
+[OK] [hitungan] VACUUM transaksi 1,2 juta baris, scale_factor = 0,02 (Praktik)
+       aktual   : 24050.0
+       harapan  : 24050.0
+[OK] [hitungan] ANALYZE transaksi 1,2 juta baris, scale_factor = 0,01
+       aktual   : 12050.0
+       harapan  : 12050.0
+[OK] [hitungan] UPDATE 200.000 baris pada Praktik (>40.050) memicu autovacuum dalam ±1 menit bila tidak dimatikan; itu bisa mengubah n_dead_tup sebelum Anda melihatnya
+       200.000 > 40.050
+
+==============================================================================
+C. Latihan 5: shared_buffers dan batas work_mem untuk 16 GB RAM [hitungan]
+==============================================================================
+[OK] [hitungan] usulan awal shared_buffers = 25% RAM (MiB)
+       aktual   : 4096.0
+       harapan  : 4096.0
+  dasar                           :  40.96 MiB
+  hash x2 (hash_mem_multiplier)   :  20.48 MiB
+  paralel 3 proses                :  13.65 MiB
+  hash x2 dan paralel 3           :   6.83 MiB
+[OK] [hitungan] memori tersedia untuk work_mem (MiB)
+       aktual   : 8192.0
+       harapan  : 8192.0
+[OK] [hitungan] batas teoretis terburuk, kasus dasar (MiB)
+       aktual   : 40.96
+       harapan  : 40.96
+[OK] [hitungan] dengan hash_mem_multiplier = 2
+       aktual   : 20.48
+       harapan  : 20.48
+[OK] [hitungan] dengan paralel (1 leader + 2 worker)
+       aktual   : 13.65
+       harapan  : 13.65
+[OK] [hitungan] keduanya
+       aktual   : 6.83
+       harapan  : 6.83
+
+==============================================================================
+D. Model xmin horizon: kapan dead tuple boleh dibuang [SIMULASI]
+==============================================================================
+[OK] [SIMULASI] dead tuple yang bisa dibuang: tidak ada sesi lain menggantung
+       aktual   : 1000
+       harapan  : 1000
+[OK] [SIMULASI] dead tuple yang bisa dibuang: A: READ COMMITTED, hanya SELECT, idle (tanpa snapshot, tanpa xid) [premis]
+       aktual   : 1000
+       harapan  : 1000
+[OK] [SIMULASI] dead tuple yang bisa dibuang: A: REPEATABLE READ, snapshot diambil SEBELUM update (xmin=100)
+       aktual   : 0
+       harapan  : 0
+[OK] [SIMULASI] dead tuple yang bisa dibuang: A: transaksi menulis, memegang xid=100
+       aktual   : 0
+       harapan  : 0
+[OK] [SIMULASI] dead tuple yang bisa dibuang: A: REPEATABLE READ, snapshot diambil SESUDAH update (xmin=106)
+       aktual   : 1000
+       harapan  : 1000
+[CATATAN] Skenario kedua bergantung pada premis perilaku snapshot READ COMMITTED yang BELUM saya uji di PostgreSQL.
+          dua_sesi.sh membuktikannya langsung: lihat backend_xmin/backend_xid dan baris 'dead but not yet removable'.
+
+==============================================================================
+E. Latihan 6: arah biaya fsync [SQLite]
+==============================================================================
+3,000 commit di SQLite (detik): synchronous=FULL 1.728, synchronous=OFF 0.0434, 40x
+[OK] [SQLite] tanpa fsync, penulisan jauh lebih cepat (arah). Harganya: tidak ada jaminan data sampai ke media saat listrik/OS mati
+       40x lebih cepat
+
+Semua 24 pemeriksaan sesuai harapan.

@@ -1,0 +1,128 @@
+
+==============================================================================
+A. Praktik Partitioning: jumlah baris per partisi [hitungan Python]
+==============================================================================
+[OK] [hitungan] baris per partisi (zona waktu sesi konsisten untuk data dan batas)
+       aktual   : {'log_2026_10': 44639, 'log_2026_11': 35361, 'log_default': 0}
+       harapan  : {'log_2026_10': 44639, 'log_2026_11': 35361, 'log_default': 0}
+[OK] [hitungan] baris pada 1 November 00:00 (g = 44.640) masuk partisi November (batas bawah inklusif)
+       tepat 2026-11-01 00:00 -> log_2026_11
+
+==============================================================================
+B. Pagination: OFFSET vs keyset [SQLite]
+==============================================================================
+[OK] [SQLite] TANPA index: keduanya harus mengurutkan (USE TEMP B-TREE), tidak ada yang 'cepat'
+       offset: SCAN t | USE TEMP B-TREE FOR ORDER BY || keyset: SCAN t | USE TEMP B-TREE FOR ORDER BY
+[OK] [SQLite] DENGAN index: keyset melompat (SEARCH), OFFSET tetap memindai (SCAN)
+       offset: SCAN t USING COVERING INDEX i_id || keyset: SEARCH t USING COVERING INDEX i_id (id>?)
+[OK] [SQLite] hasil halaman keyset sama dengan halaman OFFSET pada data statis
+       aktual   : [(270002,), (270004,), (270006,), (270008,), (270010,), (270012,), (270014,), (270016,), (270018,), (270020,), (270022,), (270024,), (270026,), (270028,), (270030,), (270032,), (270034,), (270036,), (270038,), (270040,)]
+       harapan  : [(270002,), (270004,), (270006,), (270008,), (270010,), (270012,), (270014,), (270016,), (270018,), (270020,), (270022,), (270024,), (270026,), (270028,), (270030,), (270032,), (270034,), (270036,), (270038,), (270040,)]
+waktu SQLite (ms/query): OFFSET 1.139, keyset 0.0073, 157x
+[OK] [SQLite] OFFSET besar jauh lebih lambat daripada keyset ber-index (arah)
+       157x
+[OK] [SQLite] OFFSET: baris terakhir halaman 1 muncul LAGI di halaman 2 (hasil bergeser)
+       hal1[-1]=40, hal2_offset[0]=40
+[OK] [SQLite] keyset: tidak ada duplikat, halaman 2 mulai tepat sesudah baris terakhir halaman 1
+       hal2_keyset[0]=42
+[OK] [SQLite] keyset (dibuat, id) menelusuri SEMUA baris tepat sekali walau banyak waktu yang sama
+       aktual   : [('2026-01-05', 39), ('2026-01-05', 34), ('2026-01-05', 29), ('2026-01-05', 24), ('2026-01-05', 19), ('2026-01-05', 14), ('2026-01-05', 9), ('2026-01-05', 4), ('2026-01-04', 38), ('2026-01-04', 33), ('2026-01-04', 28), ('2026-01-04', 23), ('2026-01-04', 18), ('2026-01-04', 13), ('2026-01-04', 8), ('2026-01-04', 3), ('2026-01-03', 37), ('2026-01-03', 32), ('2026-01-03', 27), ('2026-01-03', 22), ('2026-01-03', 17), ('2026-01-03', 12), ('2026-01-03', 7), ('2026-01-03', 2), ('2026-01-02', 36), ('2026-01-02', 31), ('2026-01-02', 26), ('2026-01-02', 21), ('2026-01-02', 16), ('2026-01-02', 11), ('2026-01-02', 6), ('2026-01-02', 1), ('2026-01-01', 40), ('2026-01-01', 35), ('2026-01-01', 30), ('2026-01-01', 25), ('2026-01-01', 20), ('2026-01-01', 15), ('2026-01-01', 10), ('2026-01-01', 5)]
+       harapan  : [('2026-01-05', 39), ('2026-01-05', 34), ('2026-01-05', 29), ('2026-01-05', 24), ('2026-01-05', 19), ('2026-01-05', 14), ('2026-01-05', 9), ('2026-01-05', 4), ('2026-01-04', 38), ('2026-01-04', 33), ('2026-01-04', 28), ('2026-01-04', 23), ('2026-01-04', 18), ('2026-01-04', 13), ('2026-01-04', 8), ('2026-01-04', 3), ('2026-01-03', 37), ('2026-01-03', 32), ('2026-01-03', 27), ('2026-01-03', 22), ('2026-01-03', 17), ('2026-01-03', 12), ('2026-01-03', 7), ('2026-01-03', 2), ('2026-01-02', 36), ('2026-01-02', 31), ('2026-01-02', 26), ('2026-01-02', 21), ('2026-01-02', 16), ('2026-01-02', 11), ('2026-01-02', 6), ('2026-01-02', 1), ('2026-01-01', 40), ('2026-01-01', 35), ('2026-01-01', 30), ('2026-01-01', 25), ('2026-01-01', 20), ('2026-01-01', 15), ('2026-01-01', 10), ('2026-01-01', 5)]
+
+==============================================================================
+C. Latihan 1: normalisasi 3NF tanpa kehilangan data [SQLite]
+==============================================================================
+[OK] dependensi pelanggan_nama -> pelanggan_alamat berlaku pada data contoh
+       aktual   : 0
+       harapan  : 0
+[OK] dependensi produk_nama -> produk_harga berlaku pada data contoh (harga sama di semua baris)
+       aktual   : 0
+       harapan  : 0
+[OK] baris tiap tabel hasil normalisasi
+       aktual   : {'pelanggan': 3, 'produk': 3, 'pesanan': 6, 'item_pesanan': 6}
+       harapan  : {'pelanggan': 3, 'produk': 3, 'pesanan': 6, 'item_pesanan': 6}
+[OK] rekonstruksi (join 4 tabel) EXCEPT tabel lama = kosong
+       aktual   : []
+       harapan  : []
+[OK] tabel lama EXCEPT rekonstruksi = kosong
+       aktual   : []
+       harapan  : []
+[OK] anomali update: baris yang harus diubah (tabel lama vs tabel normal)
+       aktual   : (2, 1)
+       harapan  : (2, 1)
+
+==============================================================================
+D. Latihan 2: JSON hibrida vs EAV [SQLite JSON1]
+==============================================================================
+[OK] EAV dan JSON memberi hasil yang sama untuk bug versi 2.3 tingkat tinggi
+       aktual   : [(1,)]
+       harapan  : [(1,)]
+[OK] banyak baris EAV vs 1 baris per tiket (6 tiket, 11 pasangan atribut: 3x2 + 2x2 + 1)
+       aktual   : (6, 11)
+       harapan  : (6, 11)
+[OK] JSON + CHECK menolak: bug tanpa versi
+       aktual   : ditolak
+       harapan  : ditolak
+[OK] JSON + CHECK menolak: jumlah bukan angka
+       aktual   : ditolak
+       harapan  : ditolak
+[OK] EAV menerima nilai salah tipe tanpa protes (semua nilai teks, tanpa tipe dan constraint)
+       INSERT nilai 'abc' pada atribut jumlah berhasil
+[CATATAN] SQLite diam-diam mengubah CAST('abc' AS NUMERIC) menjadi 0, jadi error cast PostgreSQL pada EAV tidak bisa dibuktikan di sini: 0
+
+==============================================================================
+E. Latihan 3: logika partisi harian [hitungan Python]
+==============================================================================
+[OK] [hitungan] 100.000 baris selama 3 hari penuh: baris per hari
+       aktual   : [33334, 33333, 33333]
+       harapan  : [33334, 33333, 33333]
+[OK] [hitungan] tidak ada baris yang jatuh di luar 3 partisi (tidak butuh partisi DEFAULT)
+       detik terakhir = 259197.408 < 259200
+[OK] [hitungan] partisi harian bersambung tanpa celah dan tanpa tumpang tindih (batas atas = batas bawah berikutnya)
+       ('sensor_20261201', '2026-12-01', '2026-12-02') ... ('sensor_20261210', '2026-12-10', '2026-12-11')
+[OK] [hitungan] nama partisi untuk 2026-12-04
+       aktual   : sensor_20261204
+       harapan  : sensor_20261204
+[OK] [hitungan] pemanggilan ulang idempoten (CREATE TABLE IF NOT EXISTS): himpunan nama tidak bertambah
+       aktual   : 10
+       harapan  : 10
+
+==============================================================================
+F. Latihan 4: mesin status antrean (retry, backoff, timeout) [SQLite]
+==============================================================================
+[OK] [PADANAN] status akhir dan jumlah percobaan
+       aktual   : [('sukses', 'selesai', 1), ('gagal-sekali', 'selesai', 2), ('selalu-gagal', 'gagal', 3)]
+       harapan  : [('sukses', 'selesai', 1), ('gagal-sekali', 'selesai', 2), ('selalu-gagal', 'gagal', 3)]
+[OK] [PADANAN] dengan backoff, tugas tidak bisa diambil sebelum waktunya
+       pada jam 100 tidak ada tugas
+[OK] [PADANAN] ... masih belum pada jam 129
+       jalankan_setelah = 130
+[OK] [PADANAN] ... bisa diambil pada jam 130 sebagai percobaan ke-2
+       aktual   : ('backoff', 2)
+       harapan  : ('backoff', 2)
+[OK] [PADANAN] visibility timeout (batas 300): macet kembali ke antrean, yang sudah 3x gagal, yang baru mulai tidak disentuh
+       aktual   : [('macet', 'menunggu'), ('macet-terakhir', 'gagal'), ('baru-mulai', 'diproses')]
+       harapan  : [('macet', 'menunggu'), ('macet-terakhir', 'gagal'), ('baru-mulai', 'diproses')]
+[CATATAN] FOR UPDATE SKIP LOCKED (konkurensi antar worker) TIDAK bisa diuji di SQLite. Lihat dua_sesi.sh antrean di Modul 7.
+
+==============================================================================
+G. Latihan 5: biaya cara muat data (arah, SQLite file) [SQLite]
+==============================================================================
+20,000 baris di SQLite (detik): satu transaksi per baris 11.09; semua dalam satu transaksi 0.027; executemany 0.017
+[OK] [SQLite] commit per baris jauh lebih lambat daripada satu transaksi (arah)
+       410x
+[OK] [SQLite] ketiga cara menghasilkan jumlah baris yang sama
+       aktual   : [20000, 20000, 20000]
+       harapan  : [20000, 20000, 20000]
+
+==============================================================================
+H. Latihan 9: UPDATE bertahap (batch) vs satu UPDATE besar [SQLite]
+==============================================================================
+[OK] 25.000 baris dengan batch 10.000: ukuran tiap batch
+       aktual   : [10000, 10000, 5000]
+       harapan  : [10000, 10000, 5000]
+[OK] tidak ada baris yang tersisa NULL
+       aktual   : 0
+       harapan  : 0
+
+Semua 34 pemeriksaan sesuai harapan.

@@ -1,0 +1,90 @@
+
+==============================================================================
+A. Distribusi data hasil rumus modul (mengapa ukuran partial index = ±12,5%)
+==============================================================================
+persentase per status: {'baru': 12.5, 'batal': 12.6, 'dibayar': 25.0, 'dikirim': 25.0, 'selesai': 24.8}
+[OK] 'baru' dan 'batal' ±12,5%; tiga status lain ±25% (akibat pembulatan ::int)
+       {'baru': 12.5, 'batal': 12.6, 'dibayar': 25.0, 'dikirim': 25.0, 'selesai': 24.8}
+[OK] pelanggan_id berkisar 1..10001 (10001 muncul sangat jarang), rata-rata baris per pelanggan = N/10000
+       min=1 maks=10001 rata-rata baris/pelanggan=30.0 (untuk 1 juta baris: ±100)
+
+==============================================================================
+B. Sebelum dan sesudah index (rencana + arah waktu)
+==============================================================================
+[OK] [SQLite] tanpa index: pemindaian seluruh tabel
+       aktual   : SCAN t
+       harapan  : SCAN t
+[OK] [SQLite] dengan index: pencarian lewat index
+       aktual   : SEARCH t USING INDEX i_pel (pelanggan_id=?)
+       harapan  : SEARCH t USING INDEX i_pel (pelanggan_id=?)
+waktu baca SQLite (ms/query): tanpa index 8.227, dengan index 0.013, 631x lebih cepat
+[OK] [SQLite] index mempercepat pencarian selektif (arah, bukan angka PostgreSQL)
+       rasio 631x
+waktu INSERT 100.000 baris SQLite (ms): tanpa index 84, dengan index 155, 1.86x lebih lambat
+[OK] [SQLite] index memperlambat INSERT (arah)
+       rasio 1.86x
+
+==============================================================================
+C. Latihan 2: urutan kolom index komposit dan ORDER BY
+==============================================================================
+[OK] [SQLite] (pelanggan_id, dibuat_pada): SEARCH, tanpa langkah sort tambahan
+       aktual   : SEARCH t USING INDEX ic (pelanggan_id=?)
+       harapan  : SEARCH t USING INDEX ic (pelanggan_id=?)
+[OK] [SQLite] (dibuat_pada, pelanggan_id): tidak ada SEARCH; seluruh index dipindai berurutan lalu disaring
+       aktual   : SCAN t USING INDEX id_
+       harapan  : SCAN t USING INDEX id_
+[OK] [SQLite] leftmost prefix: WHERE pelanggan_id = 5 saja pada index (dibuat_pada, pelanggan_id)
+       aktual   : SCAN t
+       harapan  : SCAN t
+
+==============================================================================
+D. Latihan 3: partial index
+==============================================================================
+[OK] [SQLite] status='baru' memakai index (partial atau penuh, planner memilih yang murah)
+       aktual   : True
+       harapan  : True
+[OK] [SQLite] hanya partial: status='baru' memakai partial index
+       aktual   : SEARCH t USING INDEX ip (dibuat_pada>?)
+       harapan  : SEARCH t USING INDEX ip (dibuat_pada>?)
+[OK] [SQLite] hanya partial: status='selesai' TIDAK bisa memakainya
+       aktual   : SCAN t
+       harapan  : SCAN t
+ukuran index SQLite: partial 638,976 B, penuh 5,099,520 B, rasio 0.13
+[OK] [SQLite] partial index ±1/8 ukuran index penuh (karena 'baru' ±12,5% baris)
+       rasio 0.125
+
+==============================================================================
+E. Latihan 4: expression index
+==============================================================================
+[OK] [SQLite] index biasa pada email TIDAK dipakai oleh lower(email)
+       aktual   : SCAN t
+       harapan  : SCAN t
+[OK] [SQLite] setelah expression index: dipakai
+       aktual   : SEARCH t USING INDEX il (<expr>=?)
+       harapan  : SEARCH t USING INDEX il (<expr>=?)
+
+==============================================================================
+F. Index covering (padanan INCLUDE)
+==============================================================================
+[OK] [SQLite] semua kolom yang diminta ada di index: COVERING INDEX
+       aktual   : SEARCH t USING COVERING INDEX icv (pelanggan_id=?)
+       harapan  : SEARCH t USING COVERING INDEX icv (pelanggan_id=?)
+[OK] [SQLite] meminta kolom di luar index: harus ke tabel
+       aktual   : SEARCH t USING INDEX icv (pelanggan_id=?)
+       harapan  : SEARCH t USING INDEX icv (pelanggan_id=?)
+
+==============================================================================
+G. Latihan 6: syarat BRIN = korelasi fisik (SIMULASI Python, bukan PostgreSQL)
+==============================================================================
+korelasi posisi-nilai: berurutan 1.000, acak -0.000
+range blok yang harus dibaca dari 112: berurutan 1, acak 112
+[OK] [SIMULASI] data berurutan: korelasi ≈ 1
+       1.0000
+[OK] [SIMULASI] data acak: korelasi ≈ 0
+       -0.0001
+[OK] [SIMULASI] rentang sempit pada data berurutan hanya menyentuh ±1 range blok
+       1 dari 112
+[OK] [SIMULASI] rentang sempit pada data acak menyentuh (hampir) SEMUA range blok
+       112 dari 112
+
+Semua 21 pemeriksaan sesuai harapan.
